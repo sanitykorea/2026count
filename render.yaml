@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: gboard-noksaek
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --timeout 120 --workers 2
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
