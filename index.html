@@ -360,11 +360,11 @@ window.GBoard = (function () {
       headerTitle:"경상북도 안동시",
       type:"local", seats:2, pace:1.0, finalTotal:0,
       candidates:[
-        {name:"심재한", party:"더불어민주당", votes:0, isGreen:false},
-        {name:"김창현", party:"국민의힘",     votes:0, isGreen:false},
-        {name:"권용덕", party:"국민의힘",     votes:0, isGreen:false},
-        {name:"허승규", party:"녹색당",       votes:0, isGreen:true},
-        {name:"장원호", party:"무소속",       votes:0, isGreen:false}
+        {name:"심재한", party:"더불어민주당", votes:0, isGreen:false, number:"1"},
+        {name:"김창현", party:"국민의힘",     votes:0, isGreen:false, number:"2-가"},
+        {name:"권용덕", party:"국민의힘",     votes:0, isGreen:false, number:"2-나"},
+        {name:"허승규", party:"녹색당",       votes:0, isGreen:true,  number:"5"},
+        {name:"장원호", party:"무소속",       votes:0, isGreen:false, number:"6"}
       ]
     },
     {
@@ -373,13 +373,13 @@ window.GBoard = (function () {
       headerTitle:"제주특별자치도의회 비례대표", hideTypeLabel:true,
       type:"pr", threshold:5.0, prSeats:13, pace:1.0, finalTotal:0,
       candidates:[
-        {name:"더불어민주당", party:"더불어민주당", votes:0, isGreen:false},
-        {name:"국민의힘",     party:"국민의힘",     votes:0, isGreen:false},
-        {name:"조국혁신당",   party:"조국혁신당",   votes:0, isGreen:false},
-        {name:"개혁신당",     party:"개혁신당",     votes:0, isGreen:false},
-        {name:"진보당",       party:"진보당",       votes:0, isGreen:false},
-        {name:"기본소득당",   party:"기본소득당",   votes:0, isGreen:false},
-        {name:"녹색당",       party:"녹색당",       votes:0, isGreen:true, candidateName:"김순애"}
+        {name:"더불어민주당", party:"더불어민주당", votes:0, isGreen:false, number:"1"},
+        {name:"국민의힘",     party:"국민의힘",     votes:0, isGreen:false, number:"2"},
+        {name:"조국혁신당",   party:"조국혁신당",   votes:0, isGreen:false, number:"3"},
+        {name:"개혁신당",     party:"개혁신당",     votes:0, isGreen:false, number:"4"},
+        {name:"진보당",       party:"진보당",       votes:0, isGreen:false, number:"5"},
+        {name:"기본소득당",   party:"기본소득당",   votes:0, isGreen:false, number:"6"},
+        {name:"녹색당",       party:"녹색당",       votes:0, isGreen:true,  number:"7", candidateName:"김순애"}
       ]
     },
     {
@@ -388,13 +388,13 @@ window.GBoard = (function () {
       headerTitle:"서울특별시 강서구",
       type:"local", seats:2, pace:1.0, finalTotal:0,
       candidates:[
-        {name:"김현희", party:"더불어민주당", votes:0, isGreen:false},
-        {name:"양진석", party:"더불어민주당", votes:0, isGreen:false},
-        {name:"김민석", party:"국민의힘",     votes:0, isGreen:false},
-        {name:"안도연", party:"국민의힘",     votes:0, isGreen:false},
-        {name:"김삼렬", party:"조국혁신당",   votes:0, isGreen:false},
-        {name:"김유리", party:"녹색당",       votes:0, isGreen:true},
-        {name:"김동수", party:"무소속",       votes:0, isGreen:false}
+        {name:"김현희", party:"더불어민주당", votes:0, isGreen:false, number:"1-가"},
+        {name:"양진석", party:"더불어민주당", votes:0, isGreen:false, number:"1-나"},
+        {name:"김민석", party:"국민의힘",     votes:0, isGreen:false, number:"2-가"},
+        {name:"안도연", party:"국민의힘",     votes:0, isGreen:false, number:"2-나"},
+        {name:"김삼렬", party:"조국혁신당",   votes:0, isGreen:false, number:"3"},
+        {name:"김유리", party:"녹색당",       votes:0, isGreen:true,  number:"5"},
+        {name:"김동수", party:"무소속",       votes:0, isGreen:false, number:"6"}
       ]
     }
   ];
@@ -1437,10 +1437,10 @@ setInterval(fetchPhotos, 15000);
         if(preCands.length > 0){
           list.innerHTML = preCands.map(function(c,i){
             var col = GBoard.colorOf(c.party, i);
-            var nm = (ds.type==='pr' && rawDs) ? c.name : c.name;
+            var bNum = c.number || '';
             return '<div class="crow'+(c.isGreen?' green':'')+'">'+
-              '<div class="crow-top"><span class="rk" style="color:#ddd">—</span>'+
-                '<span class="nm">'+nm+'</span>'+
+              '<div class="crow-top"><span class="rk">'+bNum+'</span>'+
+                '<span class="nm">'+c.name+'</span>'+
                 '<span class="pty">'+(ds.type==='pr'?'':c.party)+'</span>'+
                 '<span class="sp"><span class="pc" style="color:#ccc">—%</span>'+
                 '<span class="vt" style="color:#ccc">집계전</span></span></div>'+
@@ -1451,12 +1451,16 @@ setInterval(fetchPhotos, 15000);
           list.innerHTML='<div class="empty"><div class="big">개표 시작 전</div><div class="sm">개표가 시작되면 실시간으로 표시됩니다</div></div>';
         }
       } else {
+        // 이름 → 기호 매핑
+        var numMap={};
+        if(rawDs) rawDs.candidates.forEach(function(rc){ if(rc.number) numMap[rc.name]=rc.number; });
         var maxP=Math.max.apply(null,ds.candidates.map(function(c){return c.pct;}).concat([1]));
         list.innerHTML=ds.candidates.map(function(c,i){
           var col=GBoard.colorOf(c.party,i);
           var w=maxP>0?(c.pct/maxP*100):0;
+          var bNum=numMap[c.name]||'';
           return '<div class="crow'+(c.isGreen?' green':'')+'">'+
-            '<div class="crow-top"><span class="rk">'+c.rank+'</span>'+
+            '<div class="crow-top"><span class="rk">'+bNum+'</span>'+
               '<span class="nm">'+c.name+'</span>'+
               '<span class="pty">'+(ds.type==='pr'?'':c.party)+'</span>'+
               '<span class="sp"><span class="pc" style="color:'+col+'">'+c.pct.toFixed(1)+'%</span>'+
