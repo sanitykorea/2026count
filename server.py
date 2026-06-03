@@ -122,10 +122,12 @@ def fetch_nec_data(election_code, city_code):
         'topMenuId':    'VC',
         'secondMenuId': 'VCCP09',
         'menuId':       'VCCP09',
-        'statementId':  f'{ELECTION_ID}.VCCP09_#{election_code}',
-        'electionType': '4',
+        'statementId':  f'{ELECTION_ID}.VCCP09_#{election_code}_0',
         'electionCode': str(election_code),
         'cityCode':     str(city_code),
+        'sggCityCode':  '0',
+        'townCode':     '-1',
+        'sggTownCode':  '0',
     }
     r = sess.post(f'{BASE_URL}/electioninfo/electionInfo_report.xhtml', data=post_data, timeout=20)
     r.raise_for_status()
@@ -349,114 +351,77 @@ def _nec_session():
     })
     return sess
 
-def _parse_rate_from_soup(soup):
-    """HTML에서 투표율 숫자와 기준시각 추출. (rate, asOf) 반환."""
-    text_all = soup.get_text()
-    asOf = None
-    m = _re.search(r'(오전|오후)?\s*\d{1,2}시\s*기준', text_all)
-    if m:
-        asOf = m.group(0).strip()
-
+def _parse_turnout_from_soup(soup):
+    """투표진행상황 HTML에서 전국 투표율(%) 추출. (rate, asOf) 반환."""
+    # 표의 마지막 컬럼이 투표율(%) — "합계" 행을 우선 사용
     table = soup.find('table', class_='table01') or soup.find('table')
     if not table:
-        return None, asOf
+        return None, None
 
-    rows = table.find_all('tr')
-
-    # 투표율 컬럼 인덱스 파악
-    rate_col = None
-    for row in rows:
-        for i, th in enumerate(row.find_all('th')):
-            if '투표율' in th.get_text():
-                rate_col = i
-                break
-        if rate_col is not None:
-            break
-
-    best = None
-    for row in rows:
+    rate = None
+    for row in table.find_all('tr'):
         cells = row.find_all('td')
         if not cells:
             continue
-        row_text = ' '.join(c.get_text(strip=True) for c in cells)
-        is_total = any(w in row_text for w in ['전국', '합계', '소계'])
+        first = cells[0].get_text(strip=True)
+        # 합계 행 우선, 없으면 첫 데이터 행
+        is_total = '합계' in first
+        # 마지막 셀에서 "숫자%" 패턴 추출
+        last_cell = cells[-1].get_text(strip=True)
+        m = _re.search(r'(\d{1,3}\.\d+)\s*%?', last_cell)
+        if m:
+            v = float(m.group(1))
+            if 0.0 < v <= 100.0:
+                rate = v
+                if is_total:
+                    break  # 합계 행이면 바로 종료
 
-        candidates = []
-        # 1) 컬럼 인덱스로 직접
-        if rate_col is not None and rate_col < len(cells):
-            t = cells[rate_col].get_text(strip=True).replace(',', '')
-            try:
-                v = float(t)
-                if 0.0 < v <= 100.0:
-                    candidates.append(v)
-            except Exception:
-                pass
-        # 2) 뒤쪽 셀에서 소수점 숫자 탐색
-        for cell in reversed(cells):
-            t = cell.get_text(strip=True).replace(',', '')
-            if _re.fullmatch(r'\d{1,3}\.\d+', t):
-                v = float(t)
-                if 0.0 < v <= 100.0:
-                    candidates.append(v)
-                    break
-
-        if candidates:
-            best = candidates[0]
-            if is_total:
-                break
-
-    return best, asOf
+    # 기준시각: 현재 서버 시각 기준
+    asOf = datetime.now().strftime('%H:%M') + ' 기준'
+    return rate, asOf
 
 
 def fetch_turnout_data(debug=False):
-    """NEC에서 투표율을 가져온다. debug=True면 raw HTML도 반환."""
+    """NEC 투표진행상황 페이지에서 전국 투표율을 가져온다."""
     sess = _nec_session()
 
-    # 시도할 파라미터 조합 (electionType × statementId suffix)
-    candidates_params = [
-        ('4', '4'), ('4', '1'), ('4', '0'),
-        ('3', '3'), ('3', '1'),
-        ('1', '1'), ('1', '4'),
-    ]
+    # 세션 쿠키 획득
+    try:
+        sess.get(
+            f'{BASE_URL}/main/showDocument.xhtml'
+            f'?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCVP01',
+            timeout=15
+        )
+    except Exception:
+        pass
+
+    post_data = {
+        'electionId':   ELECTION_ID,
+        'requestURI':   f'/electioninfo/{ELECTION_ID}/vc/vcvp01.jsp',
+        'topMenuId':    'VC',
+        'secondMenuId': 'VCVP01',
+        'menuId':       'VCVP01',
+        'statementId':  f'{ELECTION_ID}.VCVP01_#2_SUM',
+        'sggTime':      '30시',   # 전체/최신 데이터
+    }
 
     last_html = ''
     last_error = ''
 
-    for el_type, stmt_sfx in candidates_params:
-        try:
-            sess.get(
-                f'{BASE_URL}/main/showDocument.xhtml'
-                f'?electionId={ELECTION_ID}&topMenuId=VR&secondMenuId=VRCP09',
-                timeout=10
-            )
-        except Exception:
-            pass
+    try:
+        r = sess.post(
+            f'{BASE_URL}/electioninfo/electionInfo_report.xhtml',
+            data=post_data, timeout=20
+        )
+        r.raise_for_status()
+        last_html = r.text
 
-        post_data = {
-            'electionId':   ELECTION_ID,
-            'requestURI':   f'/electioninfo/{ELECTION_ID}/vr/vrcp09.jsp',
-            'topMenuId':    'VR',
-            'secondMenuId': 'VRCP09',
-            'menuId':       'VRCP09',
-            'statementId':  f'{ELECTION_ID}.VRCP09_#{stmt_sfx}',
-            'electionType': el_type,
-            'cityCode':     '0',
-        }
-        try:
-            r = sess.post(
-                f'{BASE_URL}/electioninfo/electionInfo_report.xhtml',
-                data=post_data, timeout=20
-            )
-            r.raise_for_status()
-            last_html = r.text
-
-            # 데이터 없음 문자열이면 다음 조합 시도
-            if '조회 자료가 없습니다' in r.text or '집계된 자료가 없습니다' in r.text:
-                last_error = f'no_data (electionType={el_type}, stmt=#{stmt_sfx})'
-                continue
+        no_data_msgs = ['조회 자료가 없습니다', '집계된 자료가 없습니다', '비정상적인 접근']
+        if any(msg in r.text for msg in no_data_msgs):
+            last_error = '투표 집계 전 또는 서비스 준비 중'
 
             soup = BeautifulSoup(r.text, 'html.parser')
-            rate, asOf = _parse_rate_from_soup(soup)
+            rate, asOf = _parse_turnout_from_soup(soup)
 
             if rate is not None:
                 result = {
@@ -464,18 +429,16 @@ def fetch_turnout_data(debug=False):
                     'rate':      rate,
                     'asOf':      asOf,
                     'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    '_params':   f'electionType={el_type} stmt=#{stmt_sfx}',
                 }
                 if debug:
                     result['_html'] = r.text[:8000]
                 return result
 
-            last_error = f'rate_not_found (electionType={el_type}, stmt=#{stmt_sfx})'
+            last_error = 'rate_not_found'
 
-        except Exception as e:
-            last_error = str(e)
+    except Exception as e:
+        last_error = str(e)
 
-    # 모든 조합 실패
     result = {
         'status':    'no_data',
         'rate':      None,

@@ -320,7 +320,7 @@ window.GBoard = (function () {
   "use strict";
 
   var DEMO_TICK = 4;
-  var REAL_TICK = 60;
+  var REAL_TICK = 15;
   var DEMO_STEP = 0.082;
 
   var ELECTION = { title: "제9회 전국동시지방선거", date: "2026. 6. 3. (수)", party: "녹색당" };
@@ -384,7 +384,7 @@ window.GBoard = (function () {
   var state = {
     mode:"crawl", progress:0, running:true, cycle:0, countdown:REAL_TICK,
     manual:null,
-    crawl:{ url:"/api/gboard", interval:60 },
+    crawl:{ url:"/api/gboard", interval:15 },
     crawlData:null, crawlStatus:{ ok:false, msg:"대기 중", time:"" },
     history:[[],[],[]],
     lastUpdateTime: null,
@@ -407,7 +407,8 @@ window.GBoard = (function () {
         if(s.crawl && s.crawl.url) state.crawl = s.crawl;
       }
     }catch(e){}
-    if(!state.crawl || !state.crawl.url) state.crawl={url:"/api/gboard",interval:60};
+    if(!state.crawl || !state.crawl.url) state.crawl={url:"/api/gboard",interval:15};
+    else if(state.crawl.interval >= 60) state.crawl.interval=15; // 구버전 60s → 15s 마이그레이션
   }
   function save(){
     try{ localStorage.setItem(LS_KEY,JSON.stringify({
@@ -773,6 +774,28 @@ window.GPanel = (function () {
 
     function spin(b){b.style.transition="transform .6s";b.style.transform="rotate(360deg)";setTimeout(function(){b.style.transition="none";b.style.transform="none";},650);}
 
+    /* ── 관리자 → 서버 오버라이드 푸시 ── */
+    var _lastPushedCycle = -1;
+    function pushOverride(snap){
+      if(!ADMIN_PW_CACHE) return;
+      if(snap.mode==="crawl") return; // 크롤 모드는 NEC 데이터 그대로
+      if(snap.cycle===_lastPushedCycle) return; // 같은 사이클 중복 방지
+      _lastPushedCycle = snap.cycle;
+      var payload = snap.districts.map(function(d){
+        return {
+          id: d.id,
+          countingRate: +(d.countingRate||0).toFixed(1),
+          status: d.status||'집계전',
+          candidates: (d.candidates||[]).map(function(c){
+            return {name:c.name, party:c.party, votes:c.votes||0, isGreen:!!c.isGreen};
+          })
+        };
+      });
+      fetch('/api/override',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({password:ADMIN_PW_CACHE, payload:payload})
+      }).catch(function(){});
+    }
+
     GBoard.subscribe(function(snap){
       var m=snap.mode;
       bDemo.classList.toggle("on",m==="demo");
@@ -791,6 +814,7 @@ window.GPanel = (function () {
       }
       var label=m==="demo"?"데모":m==="manual"?"실시간":"크롤링";
       cd.querySelector(".cdtxt").textContent="다음 갱신 "+snap.countdown+"초 · "+label+" · #"+snap.cycle;
+      pushOverride(snap);
     });
   }
 
