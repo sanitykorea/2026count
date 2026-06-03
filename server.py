@@ -76,45 +76,111 @@ CITIES = {
     '4700':'경상북도','4800':'경상남도','4900':'제주특별자치도',
 }
 
-# ── GBoard 3개 선거구 설정 ───────────────────────────────────
-# id는 HTML DISTRICTS 배열의 인덱스(0·1·2)와 일치해야 함
+# ── GBoard 3개 선거구 — 브라우저 DevTools 실측 POST 파라미터 ──
+# posts: 각 선거구별 POST 파라미터 목록 (제주는 제주시+서귀포시 2개)
 GBOARD_DISTRICTS = [
     {
-        'id':            0,
-        'election_code': 6,       # 구·시·군의회의원선거
-        'city_code':     '4700',  # 경상북도
-        'row_filter':    '안동',  # 행 이름에 이 문자열이 포함된 행 사용
-        'sub_filter':    '마',    # 추가 필터 (선거구 이름)
-        'is_pr':         False,
+        'id': 0,  # 경상북도 안동시 마선거구
+        'is_pr': False,
+        'posts': [
+            {'electionCode':'6', 'cityCode':'4700', 'sggCityCode':'-1',
+             'townCodeFromSgg':'-1', 'townCode':'4706', 'sggTownCode':'6470605',
+             'checkCityCode':'-1', 'x':'68', 'y':'7'},
+        ],
     },
     {
-        'id':            1,
-        'election_code': 8,       # 광역의원비례대표
-        'city_code':     '4900',  # 제주특별자치도
-        'row_filter':    None,    # None이면 합계 행 사용
-        'sub_filter':    None,
-        'is_pr':         True,
+        'id': 1,  # 제주특별자치도 광역비례 (제주시+서귀포시 합산)
+        'is_pr': True,
+        'posts': [
+            {'electionCode':'8', 'cityCode':'4900', 'sggCityCode':'-1',
+             'townCodeFromSgg':'-1', 'townCode':'4901', 'sggTownCode':'-1',
+             'checkCityCode':'-1', 'x':'84', 'y':'21'},
+            {'electionCode':'8', 'cityCode':'4900', 'sggCityCode':'-1',
+             'townCodeFromSgg':'-1', 'townCode':'4902', 'sggTownCode':'-1',
+             'checkCityCode':'-1', 'x':'57', 'y':'34'},
+        ],
     },
     {
-        'id':            2,
-        'election_code': 6,       # 구·시·군의회의원선거
-        'city_code':     '1100',  # 서울특별시
-        'row_filter':    '강서구',
-        'sub_filter':    '라',
-        'is_pr':         False,
+        'id': 2,  # 서울특별시 강서구 라선거구
+        'is_pr': False,
+        'posts': [
+            {'electionCode':'6', 'cityCode':'1100', 'sggCityCode':'-1',
+             'townCodeFromSgg':'-1', 'townCode':'1116', 'sggTownCode':'6111604',
+             'checkCityCode':'-1', 'x':'70', 'y':'25'},
+        ],
     },
 ]
 
-# ── NEC 데이터 수집 ──────────────────────────────────────────
+# ── VCCP08 특정 선거구 조회 (브라우저 실측 파라미터) ─────────
+def fetch_district_data(post_params):
+    """VCCP08 개표단위별 개표결과로 특정 선거구 데이터 조회."""
+    sess = _nec_session()
+    # showDocument로 세션 쿠키 획득
+    show_url = f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCCP08'
+    try:
+        sess.get(BASE_URL + '/', timeout=6)
+        sess.get(show_url, timeout=8)
+    except Exception:
+        pass
+    # 브라우저 실측: 두 번째 POST의 Referer는 electionInfo_report.xhtml
+    sess.headers.update({'Referer': f'{BASE_URL}/electioninfo/electionInfo_report.xhtml'})
+
+    data = {
+        'electionId':   ELECTION_ID,
+        'requestURI':   f'/electioninfo/{ELECTION_ID}/vc/vccp08.jsp',
+        'topMenuId':    'VC',
+        'secondMenuId': 'VCCP08',
+        'menuId':       'VCCP08',
+        'statementId':  'VCCP08_#00',
+    }
+    data.update(post_params)
+
+    r = sess.post(
+        f'{BASE_URL}/electioninfo/electionInfo_report.xhtml',
+        data=data, timeout=12
+    )
+    r.raise_for_status()
+    return parse_html(r.text, post_params['electionCode'], post_params['cityCode'])
+
+
+def _merge_district_results(results):
+    """여러 fetch 결과를 후보자별 득표수 합산으로 병합."""
+    ok_results = [r for r in results if r.get('status') == 'ok' and r.get('districts')]
+    if not ok_results:
+        return None
+
+    # 후보자 매핑 (이름 기준)
+    cand_map = {}
+    total_voter  = 0
+    total_votes  = 0
+
+    for res in ok_results:
+        for dist in res['districts']:
+            total_voter += dist['voter_count']
+            total_votes += dist['total_votes']
+            for c in dist['candidates']:
+                key = c['name']
+                if key not in cand_map:
+                    cand_map[key] = {'name': c['name'], 'party': c['party'], 'votes': 0}
+                cand_map[key]['votes'] += c['votes']
+
+    if not cand_map:
+        return None
+
+    candidates = sorted(cand_map.values(), key=lambda c: -c['votes'])
+    tot_cand   = sum(c['votes'] for c in candidates)
+    for c in candidates:
+        c['pct']     = round(c['votes'] / tot_cand * 100, 2) if tot_cand > 0 else 0.0
+        c['isGreen'] = '녹색당' in (c.get('party') or '')
+
+    rate   = round(min(100, total_votes / total_voter * 100), 1) if total_voter > 0 and total_votes > 0 else 0
+    status = '개표완료' if rate >= 99.9 else ('개표중' if total_votes > 0 else '집계전')
+    return {'rate': rate, 'status': status, 'candidates': candidates}
+
+
+# ── NEC 데이터 수집 (일반 API용 레거시) ─────────────────────
 def fetch_nec_data(election_code, city_code):
-    sess = requests.Session()
-    sess.headers.update({
-        'User-Agent':      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
-        'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
-        'Referer':         BASE_URL + '/',
-        'Origin':          BASE_URL,
-    })
+    sess = _nec_session()
     try:
         sess.get(BASE_URL + '/', timeout=6)
     except Exception:
@@ -277,39 +343,22 @@ def api_gboard():
 
     def fetch_one(dc):
         try:
-            data = fetch_nec_data(dc['election_code'], dc['city_code'])
-            if data.get('status') != 'ok':
+            # 각 POST 파라미터로 조회 (제주는 2개)
+            results = []
+            for post_params in dc['posts']:
+                res = fetch_district_data(post_params)
+                results.append(res)
+
+            merged = _merge_district_results(results)
+            if not merged:
                 return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
 
-            districts = data.get('districts', [])
-            matching = None
-            for d in districts:
-                nm = d['name']
-                rf = dc.get('row_filter')
-                sf = dc.get('sub_filter')
-                if rf and rf not in nm: continue
-                if sf and sf not in nm: continue
-                matching = d; break
-
-            if matching is None and dc.get('is_pr') and districts:
-                matching = next((d for d in districts if '합계' in d['name']), districts[0])
-            if matching is None and dc.get('row_filter'):
-                for d in districts:
-                    if dc['row_filter'] in d['name']:
-                        matching = d; break
-            if matching is None:
-                return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
-
-            total  = matching['total_votes']
-            voters = matching['voter_count']
-            rate   = round(min(100, total / voters * 100), 1) if voters > 0 and total > 0 else 0
-            status = '개표완료' if rate >= 99.9 else ('개표중' if total > 0 else '집계전')
-            candidates = [
-                {'name': c['name'], 'party': c['party'],
-                 'votes': c['votes'], 'isGreen': '녹색당' in (c.get('party') or '')}
-                for c in matching['candidates']
-            ]
-            return {'id': dc['id'], 'countingRate': rate, 'status': status, 'candidates': candidates}
+            return {
+                'id':           dc['id'],
+                'countingRate': merged['rate'],
+                'status':       merged['status'],
+                'candidates':   merged['candidates'],
+            }
         except Exception as e:
             print(f'[gboard] district {dc["id"]} error: {e}')
             return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
@@ -354,11 +403,21 @@ import re as _re
 def _nec_session():
     sess = requests.Session()
     sess.headers.update({
-        'User-Agent':      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
-        'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
-        'Referer':         BASE_URL + '/',
-        'Origin':          BASE_URL,
+        'User-Agent':                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+        'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language':           'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding':           'gzip, deflate, br',
+        'Origin':                    BASE_URL,
+        'Referer':                   BASE_URL + '/',
+        'Cache-Control':             'max-age=0',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest':            'document',
+        'Sec-Fetch-Mode':            'navigate',
+        'Sec-Fetch-Site':            'same-origin',
+        'Sec-Fetch-User':            '?1',
+        'sec-ch-ua':                 '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+        'sec-ch-ua-mobile':          '?0',
+        'sec-ch-ua-platform':        '"macOS"',
     })
     return sess
 
@@ -414,8 +473,12 @@ def fetch_turnout_data(debug=False):
         'topMenuId':    'VC',
         'secondMenuId': 'VCVP01',
         'menuId':       'VCVP01',
-        'statementId':  f'{ELECTION_ID}.VCVP01_#2_SUM',
-        'sggTime':      '30시',   # 전체/최신 데이터
+        'statementId':  'VCVP01_#2_SUM',   # 브라우저 실측값 (선거ID 접두사 없음)
+        'sggTime':      '30시',
+        'cityCode':     '0',
+        'timeCode':     '30',
+        'x':            '53',
+        'y':            '19',
     }
 
     last_html = ''
