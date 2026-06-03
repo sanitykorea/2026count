@@ -544,38 +544,34 @@ def _nec_session():
 
 def _parse_turnout_from_soup(soup):
     """투표진행상황 HTML에서 전국 투표율(%) 추출. (rate, asOf) 반환."""
-    # 전체 페이지 HTML 구조에서 '투표율' 헤더를 가진 테이블을 명시적으로 탐색
+    # 투표율이 포함된 테이블을 텍스트로 변환 후 직접 파싱
     target_table = None
     for t in soup.find_all('table'):
-        text = t.get_text()
-        if '투표율' in text and ('합계' in text or '서울' in text):
+        txt = t.get_text()
+        if '투표율' in txt and '합계' in txt:
             target_table = t
             break
-
-    # fallback: class='table01' 또는 첫 번째 table
     if not target_table:
         target_table = soup.find('table', class_='table01') or soup.find('table')
     if not target_table:
         return None, None
 
+    # 테이블 전체를 줄 단위로 분리 후 합계 행에서 숫자% 탐색
+    table_text = target_table.get_text(separator='\n')
     rate = None
-    for row in target_table.find_all('tr'):
-        cells = row.find_all('td')
-        if not cells:
+    for line in table_text.split('\n'):
+        line = line.strip()
+        if not line:
             continue
-        first = cells[0].get_text(strip=True)
-        is_total = '합계' in first
-
-        # 모든 셀에서 "숫자%" 패턴 탐색 (끝에서부터)
-        for cell in reversed(cells):
-            cell_text = cell.get_text(strip=True)
-            m = _re.search(r'(\d{1,3}\.\d+)\s*%', cell_text)
-            if m:
-                v = float(m.group(1))
-                if 0.0 < v <= 100.0:
-                    rate = v
-                    if is_total:
-                        break
+        is_total = line.startswith('합계')
+        # 해당 줄(또는 전체 텍스트)에서 "숫자%" 패턴 추출
+        matches = _re.findall(r'(\d{1,3}\.\d+)\s*%', line)
+        for match in matches:
+            v = float(match)
+            if 0.0 < v <= 100.0:
+                rate = v
+                if is_total:
+                    break
         if is_total and rate is not None:
             break
 
@@ -710,6 +706,45 @@ def api_turnout_manual():
             'manual':    True,
         }
     return jsonify({'ok': True, 'data': _manual_turnout})
+
+
+@app.route('/api/debug/gboard')
+def api_debug_gboard():
+    """관리자용 개표 데이터 디버그. ?password=... 필수.
+    각 선거구별로 NEC에서 받은 raw 테이블 텍스트와 파싱 결과를 반환.
+    """
+    if request.args.get('password') != ADMIN_PASSWORD:
+        return jsonify({'ok': False}), 403
+
+    result = []
+    for dc in GBOARD_DISTRICTS:
+        district_debug = {'id': dc['id'], 'posts': []}
+        for post_params in dc['posts']:
+            try:
+                data = fetch_district_data(post_params)
+                # 파싱된 결과 요약
+                summary = {
+                    'status':     data.get('status'),
+                    'districts':  len(data.get('districts', [])),
+                    'candidates': [
+                        {'name': c['name'], 'party': c['party'], 'votes': c['votes']}
+                        for d in data.get('districts', [])
+                        for c in d.get('candidates', [])
+                    ],
+                    'first_district': data['districts'][0] if data.get('districts') else None,
+                }
+                district_debug['posts'].append({
+                    'params':  {k: v for k, v in post_params.items() if k not in ('x','y')},
+                    'parsed':  summary,
+                })
+            except Exception as e:
+                district_debug['posts'].append({
+                    'params': post_params,
+                    'error':  str(e),
+                })
+        result.append(district_debug)
+
+    return jsonify(result)
 
 
 @app.route('/api/debug/turnout')
