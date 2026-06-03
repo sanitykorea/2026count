@@ -342,7 +342,7 @@ window.GBoard = (function () {
   var PARTY_COLORS = {
     "녹색당":"#00a167","더불어민주당":"#152484","국민의힘":"#E61E2B",
     "조국혁신당":"#06275A","개혁신당":"#FF7920","진보당":"#D6001C",
-    "정의당":"#FFED00","기본소득당":"#00D2C3","사회민주당":"#F2779A","무소속":"#9a9a9a"
+    "기본소득당":"#00D2C3","사회민주당":"#F2779A","무소속":"#9a9a9a"
   };
 
   function colorOf(party, idx) {
@@ -358,41 +358,43 @@ window.GBoard = (function () {
       id:0, region:"경상북도 안동시", regionShort:"안동",
       title:"안동시 마선거구", typeLabel:"기초의회의원",
       headerTitle:"경상북도 안동시",
-      type:"local", seats:2, pace:1.02, finalTotal:28430,
+      type:"local", seats:2, pace:1.0, finalTotal:0,
       candidates:[
-        {name:"권상도",  party:"국민의힘",     votes:9640,  isGreen:false},
-        {name:"허승규",  party:"녹색당",       votes:7180,  isGreen:true,  seed:1.1},
-        {name:"박정호",  party:"더불어민주당", votes:6980,  isGreen:false, seed:1.35},
-        {name:"정세훈",  party:"진보당",       votes:2940,  isGreen:false},
-        {name:"정한길",  party:"무소속",       votes:1690,  isGreen:false}
+        {name:"심재한", party:"더불어민주당", votes:0, isGreen:false},
+        {name:"김창현", party:"국민의힘",     votes:0, isGreen:false},
+        {name:"권용덕", party:"국민의힘",     votes:0, isGreen:false},
+        {name:"허승규", party:"녹색당",       votes:0, isGreen:true},
+        {name:"장원호", party:"무소속",       votes:0, isGreen:false}
       ]
     },
     {
       id:1, region:"제주특별자치도", regionShort:"제주",
       title:"광역의회의원 비례대표", typeLabel:"광역 비례대표",
       headerTitle:"제주특별자치도의회 비례대표", hideTypeLabel:true,
-      type:"pr", threshold:5.0, prSeats:13, pace:0.92, finalTotal:305400,
+      type:"pr", threshold:5.0, prSeats:13, pace:1.0, finalTotal:0,
       candidates:[
-        {name:"더불어민주당", party:"더불어민주당", votes:116663, isGreen:false},
-        {name:"국민의힘",     party:"국민의힘",     votes:90093,  isGreen:false},
-        {name:"조국혁신당",   party:"조국혁신당",   votes:24737,  isGreen:false},
-        {name:"녹색당",       party:"녹색당",       votes:16492,  isGreen:true,  seed:0.7, candidateName:"김순애"},
-        {name:"진보당",       party:"진보당",       votes:12827,  isGreen:false, seed:1.9},
-        {name:"개혁신당",     party:"개혁신당",     votes:9162,   isGreen:false},
-        {name:"정의당",       party:"정의당",       votes:9009,   isGreen:false}
+        {name:"더불어민주당", party:"더불어민주당", votes:0, isGreen:false},
+        {name:"국민의힘",     party:"국민의힘",     votes:0, isGreen:false},
+        {name:"조국혁신당",   party:"조국혁신당",   votes:0, isGreen:false},
+        {name:"개혁신당",     party:"개혁신당",     votes:0, isGreen:false},
+        {name:"진보당",       party:"진보당",       votes:0, isGreen:false},
+        {name:"기본소득당",   party:"기본소득당",   votes:0, isGreen:false},
+        {name:"녹색당",       party:"녹색당",       votes:0, isGreen:true, candidateName:"김순애"}
       ]
     },
     {
       id:2, region:"서울특별시 강서구", regionShort:"강서",
       title:"강서구 라선거구", typeLabel:"기초의회의원",
       headerTitle:"서울특별시 강서구",
-      type:"local", seats:2, pace:1.08, finalTotal:19620,
+      type:"local", seats:2, pace:1.0, finalTotal:0,
       candidates:[
-        {name:"최민서", party:"더불어민주당", votes:8044, isGreen:false},
-        {name:"한도윤", party:"국민의힘",     votes:6573, isGreen:false, seed:2.7},
-        {name:"김유리", party:"녹색당",       votes:2590, isGreen:true,  seed:1.4},
-        {name:"오진영", party:"진보당",       votes:1373, isGreen:false},
-        {name:"강세움", party:"무소속",       votes:1040, isGreen:false}
+        {name:"김현희", party:"더불어민주당", votes:0, isGreen:false},
+        {name:"양진석", party:"더불어민주당", votes:0, isGreen:false},
+        {name:"김민석", party:"국민의힘",     votes:0, isGreen:false},
+        {name:"안도연", party:"국민의힘",     votes:0, isGreen:false},
+        {name:"김삼렬", party:"조국혁신당",   votes:0, isGreen:false},
+        {name:"김유리", party:"녹색당",       votes:0, isGreen:true},
+        {name:"김동수", party:"무소속",       votes:0, isGreen:false}
       ]
     }
   ];
