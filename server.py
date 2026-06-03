@@ -517,32 +517,19 @@ def api_gboard():
             r = sess.post(report_url, data=post_data, timeout=12)
             r.raise_for_status()
 
-            data = parse_html(r.text, dc['election_code'], dc['city_code'])
-            if data.get('status') != 'ok' or not data.get('districts'):
+            parsed = parse_vccp09(r.text, is_pr=dc.get('is_pr', False),
+                                   row_filter=dc.get('row_filter'))
+            if parsed.get('status') != 'ok' or not parsed.get('districts'):
                 return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
 
-            districts = data['districts']
-            rf = dc.get('row_filter')
-
-            # 행 매칭 (row_filter 기준)
-            matching = None
-            if rf:
-                for d in districts:
-                    if rf in d['name']:
-                        matching = d
-                        break
-            if matching is None:
-                # fallback: 합계 행 또는 첫 번째 행
-                matching = next((d for d in districts if '합계' in d['name']), districts[0])
-
-            total = matching['total_votes']
-            tot_c = sum(c['votes'] for c in matching['candidates'])
-            rate  = round(min(100, tot_c / total * 100), 1) if total > 0 and tot_c > 0 else 0
+            dist = parsed['districts'][0]
+            rate   = min(100.0, dist.get('counting_rate', 0))
+            tot_c  = sum(c['votes'] for c in dist['candidates'])
             status = '개표완료' if rate >= 99.9 else ('개표중' if tot_c > 0 else '집계전')
             candidates = [
                 {'name': c['name'], 'party': c['party'], 'votes': c['votes'],
                  'pct': c.get('pct', 0), 'isGreen': '녹색당' in (c.get('party') or '')}
-                for c in matching['candidates']
+                for c in dist['candidates']
             ]
             return {'id': dc['id'], 'countingRate': rate, 'status': status, 'candidates': candidates}
 
@@ -586,6 +573,114 @@ def api_auth():
     return jsonify({'ok': ok})
 
 import re as _re
+
+# ── VCCP09 전용 파서 ──────────────────────────────────────────
+KNOWN_PARTIES = ['더불어민주당','국민의힘','조국혁신당','개혁신당','진보당',
+                 '기본소득당','녹색당','무소속','정의당','자유와혁신']
+
+def _split_party_name(text):
+    """'더불어민주당심재한' → ('더불어민주당', '심재한')"""
+    for p in sorted(KNOWN_PARTIES, key=len, reverse=True):
+        if text.startswith(p):
+            return p, text[len(p):].strip()
+    return '', text
+
+def parse_vccp09(html, is_pr=False, row_filter=None):
+    """VCCP09 개표진행상황 HTML 전용 파서.
+
+    기초의회 구조:
+      - sub-header row: cells[0]=시도명, cells[4:]='정당+후보명' 연결
+      - data row: cells[0]=공백, cells[1]=선거구명, cells[2:]=숫자
+    광역비례 구조:
+      - party header: cells[0..2]=공백, cells[3:]=정당명
+      - data row: cells[0]=합계/시도명, cells[1:]=숫자
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+    NO_DATA = ['검색된 결과가 없습니다','조회 자료가 없습니다','비정상적인 접근','집계된 자료가 없습니다']
+    if any(s in soup.get_text() for s in NO_DATA):
+        return {'status': 'no_data', 'districts': []}
+    table = soup.find('table')
+    if not table:
+        return {'status': 'no_data', 'districts': []}
+    rows = table.find_all('tr')
+    result = {'status': 'ok', 'districts': []}
+
+    def _ti(s): s=_re.sub(r'[^\d]','',str(s)); return int(s) if s else 0
+    def _tf(s): s=str(s).strip(); return float(s) if _re.match(r'^\d+\.?\d*$',s) else 0.0
+
+    if is_pr:
+        # 정당 헤더 행 탐색
+        parties = []
+        for row in rows:
+            cells = row.find_all('td')
+            if not cells: continue
+            txts = [c.get_text(strip=True) for c in cells]
+            if not txts[0] and any(p in ''.join(txts) for p in KNOWN_PARTIES):
+                parties = [t for t in txts[3:] if t and t not in ('계','소계')]
+                break
+        for i, row in enumerate(rows):
+            cells = row.find_all('td')
+            if not cells: continue
+            txts = [c.get_text(strip=True) for c in cells]
+            first = txts[0]
+            if not first or _re.match(r'^[\d,\.]+$', first): continue
+            if first in ('계', '소계'): continue
+            if row_filter and row_filter not in first: continue
+            n = len(parties)
+            voter = _ti(txts[1]) if len(txts)>1 else 0
+            total = _ti(txts[2]) if len(txts)>2 else 0
+            votes = [_ti(txts[3+j]) if 3+j<len(txts) else 0 for j in range(n)]
+            rate  = _tf(txts[3+n+3]) if 3+n+3<len(txts) else 0.0
+            pcts  = []
+            if i+1<len(rows):
+                pr=[c.get_text(strip=True) for c in rows[i+1].find_all('td')]
+                if pr and not pr[0]: pcts=[_tf(pr[3+j]) if 3+j<len(pr) else 0.0 for j in range(n)]
+            tot_c = sum(votes)
+            cands = [{'name':parties[j],'party':parties[j],'votes':votes[j],
+                      'pct':pcts[j] if j<len(pcts) else round(votes[j]/tot_c*100,2) if tot_c else 0.0}
+                     for j in range(n)]
+            result['districts'].append({'name':first,'voter_count':voter,'total_votes':total,
+                                        'counting_rate':rate,'candidates':cands})
+        return result
+
+    # 기초의회 구조
+    cur_cands = []
+    for i, row in enumerate(rows):
+        cells = row.find_all('td')
+        if not cells: continue
+        txts = [c.get_text(strip=True) for c in cells]
+        first = txts[0]
+        # sub-header: 첫 셀 = 시도명
+        if first and not _re.match(r'^[\d,\.]+$', first):
+            cands = []
+            for txt in txts[4:]:
+                if not txt or txt in ('계','소계'): break
+                p, nm = _split_party_name(txt)
+                if nm: cands.append({'party':p,'name':nm})
+            if cands: cur_cands = cands
+            continue
+        # data row: 첫 셀 공백, 두 번째 셀 = 선거구명
+        if not first:
+            dname = txts[1] if len(txts)>1 else ''
+            if not dname or _re.match(r'^[\d,\.]+$', dname): continue
+            if row_filter and row_filter not in dname: continue
+            n = len(cur_cands)
+            voter = _ti(txts[2]) if len(txts)>2 else 0
+            total = _ti(txts[3]) if len(txts)>3 else 0
+            votes = [_ti(txts[4+j]) if 4+j<len(txts) else 0 for j in range(n)]
+            rate  = _tf(txts[4+n+3]) if 4+n+3<len(txts) else 0.0
+            pcts  = []
+            if i+1<len(rows):
+                pr=[c.get_text(strip=True) for c in rows[i+1].find_all('td')]
+                if pr and not pr[0]: pcts=[_tf(pr[4+j]) if 4+j<len(pr) else 0.0 for j in range(n)]
+            tot_c = sum(votes)
+            cands = [{'name':cur_cands[j]['name'],'party':cur_cands[j]['party'],'votes':votes[j],
+                      'pct':pcts[j] if j<len(pcts) else round(votes[j]/tot_c*100,2) if tot_c else 0.0}
+                     for j in range(n)]
+            result['districts'].append({'name':dname,'voter_count':voter,'total_votes':total,
+                                        'counting_rate':rate,'candidates':cands})
+    return result
+
 
 def _nec_session():
     sess = requests.Session()
