@@ -289,8 +289,10 @@ def _merge_district_results(results):
         c['pct']     = round(c['votes'] / tot_cand * 100, 2) if tot_cand > 0 else 0.0
         c['isGreen'] = '녹색당' in (c.get('party') or '')
 
-    rate   = round(min(100, total_votes / total_voter * 100), 1) if total_voter > 0 and total_votes > 0 else 0
-    status = '개표완료' if rate >= 99.9 else ('개표중' if total_votes > 0 else '집계전')
+    # 개표율 = 집계된 득표수 합 / 투표수
+    # (투표수/선거인수 는 투표율이므로 사용하지 않음)
+    rate   = round(min(100, tot_cand / total_votes * 100), 1) if total_votes > 0 and tot_cand > 0 else 0
+    status = '개표완료' if rate >= 99.9 else ('개표중' if tot_cand > 0 else '집계전')
     return {'rate': rate, 'status': status, 'candidates': candidates}
 
 

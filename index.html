@@ -946,9 +946,16 @@ window.GPanel = (function () {
           if(i<result.candidates.length) result.candidates[i].votes=v;
         });
 
-        // 개표율이 없으면 투표수/선거인수로 계산
-        if(!result.countingRate && nums[0]>0 && nums[1]>0 && nums[1]<=nums[0]){
-          result.countingRate=Math.min(100, Math.round(nums[1]/nums[0]*1000)/10);
+        // 개표율 = (3번째~끝에서 두 번째까지 합) / 2번째(투표수)
+        // 즉, 집계된 표(후보 득표수 + 계 + 무효) / 투표수
+        // ※ '계' 컬럼이 포함돼 합이 투표수를 초과하면 캡(100%)
+        if(!result.countingRate && nums[1]>0 && nums.length>=4){
+          var counted=nums.slice(2, nums.length-1).reduce(function(a,b){return a+b;},0);
+          if(counted > nums[1] * 2){
+            // '계' 컬럼이 이중집계됐을 가능성 → 뒤에서 3,2번째(계+무효)만 사용
+            counted = nums[nums.length-3] + nums[nums.length-2];
+          }
+          result.countingRate=Math.min(100, Math.round(counted/nums[1]*1000)/10);
         }
         break;
       }
