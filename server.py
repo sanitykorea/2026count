@@ -79,33 +79,41 @@ CITIES = {
     '4700':'경상북도','4800':'경상남도','4900':'제주특별자치도',
 }
 
-# ── GBoard 3개 선거구 — 브라우저 DevTools 실측 POST 파라미터 ──
-# posts: 각 선거구별 POST 파라미터 목록 (제주는 제주시+서귀포시 2개)
+# ── GBoard 3개 선거구 — VCCP09 개표진행상황 (브라우저 실측 확인) ──
+# 모두 VCCP09 사용, statementId = VCCP09_#{electionCode} (prefix 없음)
 GBOARD_DISTRICTS = [
     {
-        'id': 0,  # 경상북도 안동시 마선거구
+        'id': 0,  # 경상북도 안동시 마선거구 (기초의회의원 6)
         'is_pr': False,
-        'posts': [
-            {'electionCode':'6', 'cityCode':'4700', 'sggCityCode':'-1',
-             'townCodeFromSgg':'-1', 'townCode':'4706', 'sggTownCode':'6470605',
-             'checkCityCode':'-1', 'x':'68', 'y':'7'},
-        ],
+        'election_code': 6,
+        'city_code': '4700',
+        'sgg_city_code': '0',
+        'town_code': '4706',       # 안동시
+        'sgg_town_code': '6470605', # 안동시마선거구
+        'row_filter': '마선거구',
+        'sub_filter': None,
     },
     {
-        'id': 1,  # 제주특별자치도 광역비례 → VCCP09 시도 집계 사용
+        'id': 1,  # 제주특별자치도 광역비례 (광역비례 8)
         'is_pr': True,
-        'use_vccp09': True,          # VCCP08 개별 조회 대신 VCCP09 집계 사용
         'election_code': 8,
         'city_code': '4900',
+        'sgg_city_code': '0',
+        'town_code': '-1',
+        'sgg_town_code': '0',
+        'row_filter': '합계',       # 합계 행 사용
+        'sub_filter': None,
     },
     {
-        'id': 2,  # 서울특별시 강서구 라선거구
+        'id': 2,  # 서울특별시 강서구 라선거구 (기초의회의원 6)
         'is_pr': False,
-        'posts': [
-            {'electionCode':'6', 'cityCode':'1100', 'sggCityCode':'-1',
-             'townCodeFromSgg':'-1', 'townCode':'1116', 'sggTownCode':'6111604',
-             'checkCityCode':'-1', 'x':'70', 'y':'25'},
-        ],
+        'election_code': 6,
+        'city_code': '1100',
+        'sgg_city_code': '0',
+        'town_code': '1116',       # 강서구
+        'sgg_town_code': '6111604', # 강서구라선거구
+        'row_filter': '라선거구',
+        'sub_filter': None,
     },
 ]
 
@@ -314,7 +322,7 @@ def fetch_nec_data(election_code, city_code):
         'topMenuId':    'VC',
         'secondMenuId': 'VCCP09',
         'menuId':       'VCCP09',
-        'statementId':  f'{ELECTION_ID}.VCCP09_#{election_code}_0',
+        'statementId':  f'VCCP09_#{election_code}',   # prefix 없음 (브라우저 실측)
         'electionCode': str(election_code),
         'cityCode':     str(city_code),
         'sggCityCode':  '0',
@@ -470,41 +478,61 @@ def api_gboard():
 
     def fetch_one(dc):
         try:
-            if dc.get('use_vccp09'):
-                # 광역비례 등 VCCP09 시도 집계 방식
-                data = fetch_nec_data(dc['election_code'], dc['city_code'])
-                if data.get('status') != 'ok' or not data.get('districts'):
-                    return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
-                # 합계 행 또는 첫 번째 행 사용
-                dist = next((d for d in data['districts'] if '합계' in d['name']), data['districts'][0])
-                total  = dist['total_votes']
-                voters = dist['voter_count']
-                tot_c  = sum(c['votes'] for c in dist['candidates'])
-                rate   = round(min(100, tot_c / total * 100), 1) if total > 0 and tot_c > 0 else 0
-                status = '개표완료' if rate >= 99.9 else ('개표중' if tot_c > 0 else '집계전')
-                candidates = [
-                    {'name':c['name'],'party':c['party'],'votes':c['votes'],
-                     'pct':c.get('pct',0),'isGreen':'녹색당' in (c.get('party') or '')}
-                    for c in dist['candidates']
-                ]
-                return {'id': dc['id'], 'countingRate': rate, 'status': status, 'candidates': candidates}
+            # 모든 선거구 VCCP09 통합 방식 사용
+            sess = _nec_session()
+            try:
+                sess.get(BASE_URL + '/', timeout=6)
+                show_url = f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCCP09'
+                sess.get(show_url, timeout=8)
+                sess.headers.update({'Referer': f'{BASE_URL}/electioninfo/electionInfo_report.xhtml'})
+            except Exception:
+                pass
 
-            # 일반 VCCP08 방식
-            results = []
-            for post_params in dc['posts']:
-                res = fetch_district_data(post_params)
-                results.append(res)
+            r = sess.post(f'{BASE_URL}/electioninfo/electionInfo_report.xhtml', data={
+                'electionId':   ELECTION_ID,
+                'requestURI':   f'/electioninfo/{ELECTION_ID}/vc/vccp09.jsp',
+                'topMenuId':    'VC',
+                'secondMenuId': 'VCCP09',
+                'menuId':       'VCCP09',
+                'statementId':  f'VCCP09_#{dc["election_code"]}',
+                'electionCode': str(dc['election_code']),
+                'cityCode':     dc['city_code'],
+                'sggCityCode':  dc.get('sgg_city_code', '0'),
+                'townCode':     dc.get('town_code', '-1'),
+                'sggTownCode':  dc.get('sgg_town_code', '0'),
+                'x': '60', 'y': '10',
+            }, timeout=12)
+            r.raise_for_status()
 
-            merged = _merge_district_results(results)
-            if not merged:
+            data = parse_html(r.text, dc['election_code'], dc['city_code'])
+            if data.get('status') != 'ok' or not data.get('districts'):
                 return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
 
-            return {
-                'id':           dc['id'],
-                'countingRate': merged['rate'],
-                'status':       merged['status'],
-                'candidates':   merged['candidates'],
-            }
+            districts = data['districts']
+            rf = dc.get('row_filter')
+
+            # 행 매칭 (row_filter 기준)
+            matching = None
+            if rf:
+                for d in districts:
+                    if rf in d['name']:
+                        matching = d
+                        break
+            if matching is None:
+                # fallback: 합계 행 또는 첫 번째 행
+                matching = next((d for d in districts if '합계' in d['name']), districts[0])
+
+            total = matching['total_votes']
+            tot_c = sum(c['votes'] for c in matching['candidates'])
+            rate  = round(min(100, tot_c / total * 100), 1) if total > 0 and tot_c > 0 else 0
+            status = '개표완료' if rate >= 99.9 else ('개표중' if tot_c > 0 else '집계전')
+            candidates = [
+                {'name': c['name'], 'party': c['party'], 'votes': c['votes'],
+                 'pct': c.get('pct', 0), 'isGreen': '녹색당' in (c.get('party') or '')}
+                for c in matching['candidates']
+            ]
+            return {'id': dc['id'], 'countingRate': rate, 'status': status, 'candidates': candidates}
+
         except Exception as e:
             print(f'[gboard] district {dc["id"]} error: {e}')
             return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
