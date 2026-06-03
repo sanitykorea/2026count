@@ -47,6 +47,9 @@ _photos_lock = threading.Lock()
 _display_override = None  # None → NEC 크롤링 / list → 관리자 수동 오버라이드
 _override_lock = threading.Lock()
 
+_manual_turnout = None    # None → NEC 크롤링 / dict → 관리자 수동 입력
+_turnout_lock   = threading.Lock()
+
 # ── 관리자 비밀번호 (환경변수 ADMIN_PASSWORD 로 설정, 기본 green2026) ──
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'green2026')
 
@@ -647,6 +650,10 @@ def fetch_turnout_data(debug=False):
 
 @app.route('/api/turnout')
 def api_turnout():
+    # 수동 오버라이드가 있으면 우선 반환
+    with _turnout_lock:
+        if _manual_turnout is not None:
+            return jsonify(_manual_turnout)
     try:
         data = fetch_turnout_data()
     except Exception as e:
@@ -654,6 +661,33 @@ def api_turnout():
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'rate': None, 'asOf': None}
     return jsonify(data)
+
+
+@app.route('/api/turnout/manual', methods=['POST', 'DELETE', 'OPTIONS'])
+def api_turnout_manual():
+    global _manual_turnout
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json(silent=True) or {}
+    if not _require_admin(data):
+        return jsonify({'ok': False}), 403
+    if request.method == 'DELETE':
+        with _turnout_lock:
+            _manual_turnout = None
+        return jsonify({'ok': True, 'mode': 'auto'})
+    rate = data.get('rate')
+    asOf = (data.get('asOf') or '').strip()
+    if rate is None:
+        return jsonify({'ok': False, 'error': 'rate 필요'}), 400
+    with _turnout_lock:
+        _manual_turnout = {
+            'status':    'ok',
+            'rate':      float(rate),
+            'asOf':      asOf or None,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'manual':    True,
+        }
+    return jsonify({'ok': True, 'data': _manual_turnout})
 
 
 @app.route('/api/debug/turnout')
