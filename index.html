@@ -147,6 +147,15 @@
     font-size:11.5px;font-weight:600;color:var(--ink-soft);display:flex;justify-content:space-between;
     flex-wrap:wrap;gap:6px;opacity:.85}
 
+  /* ── 당선 예측 ── */
+  .pred-section{padding:12px 18px 10px;border-bottom:1px solid var(--line-soft)}
+  .pred-label-row{display:flex;align-items:center;gap:10px;margin-bottom:5px}
+  .pred-tag{font-size:13px;font-weight:900;letter-spacing:-.03em;padding:5px 14px;border-radius:999px;color:#fff;flex-shrink:0}
+  .pred-rank{font-size:12px;font-weight:700;color:var(--ink-soft)}
+  .pred-detail{font-size:11px;font-weight:600;color:var(--ink-soft);line-height:1.5}
+  .pred-bar-wrap{height:5px;background:#2217140d;border-radius:4px;overflow:hidden;margin-top:6px}
+  .pred-bar-fill{height:100%;border-radius:4px;transition:width .8s cubic-bezier(.4,0,.2,1)}
+
   /* ── 채팅 ── */
   /* ── 선거구별 관리자 모드 바 ── */
   .district-mode-bar{display:none;padding:6px 14px 0;gap:6px;flex-wrap:wrap}
@@ -1435,6 +1444,20 @@ setInterval(fetchPhotos, 15000);
       card.className = 'card';
       card.id = 'aCard-'+ds.id;
 
+      // 당선 예측 섹션 (지역구만 — PR은 의석 배분으로 대체)
+      var predHTML = '';
+      if(ds.type !== 'pr'){
+        predHTML =
+          '<div class="pred-section" id="aPred-'+ds.id+'">'+
+            '<div class="pred-label-row">'+
+              '<span class="pred-tag" id="aPredTag-'+ds.id+'">—</span>'+
+              '<span class="pred-rank" id="aPredRank-'+ds.id+'"></span>'+
+            '</div>'+
+            '<div class="pred-detail" id="aPredDetail-'+ds.id+'"></div>'+
+            '<div class="pred-bar-wrap"><div class="pred-bar-fill" id="aPredBar-'+ds.id+'" style="width:0%"></div></div>'+
+          '</div>';
+      }
+
       // 제주(PR)에만 의석 배분 섹션 추가
       var seatAllocHTML = '';
       if(ds.type === 'pr'){
@@ -1466,6 +1489,7 @@ setInterval(fetchPhotos, 15000);
             '<div class="seat-note" id="aSeat-'+ds.id+'"></div>'+
           '</div>'+
         '</div>'+
+        predHTML +
         seatAllocHTML +
         '<div class="crate"><div class="crate-top"><span class="l">개표율</span>'+
           '<span class="v" id="aRate-'+ds.id+'">—</span></div>'+
@@ -1576,6 +1600,8 @@ setInterval(fetchPhotos, 15000);
       document.getElementById('aRate-'+ds.id).textContent = ds.countingRate.toFixed(1)+'%';
       document.getElementById('aBar-'+ds.id).style.width = ds.countingRate+'%';
 
+      // 당선 예측 (지역구만)
+      if(ds.type!=='pr') renderPrediction(ds, rawDs);
       // 의석 배분 (PR만)
       if(ds.type==='pr') renderSeatAlloc(ds);
 
@@ -1659,6 +1685,97 @@ setInterval(fetchPhotos, 15000);
       });
     }
   });
+
+  /* ── 당선 예측 계산 ────────────────────────────────────────
+     방송사 스타일 산식 (2인 선거구 기준)
+     - 당선 확정  : 개표 100% + 상위 N위
+     - 당선 확실  : 수학적 역전 불가 (격차 > 잔여 추정 투표수)
+                   OR 개표 70%+ + 격차 8%p 이상
+     - 당선 유력  : 개표 50%+ + 격차 5%p 이상
+                   OR 개표 30%+ + 격차 12%p 이상
+     - 당선 접전  : 선두권, 격차 작음
+     - 낙선 접전  : 낙선권, 격차 작음
+     - 낙선 유력  : 개표 50%+ + 열세 5%p 이상
+     - 낙선 확실  : 수학적 역전 불가 (역방향) OR 개표 70%+ + 열세 8%p 이상
+     - 낙선 확정  : 개표 100% + N위 밖
+  ── */
+  function calcGreenPrediction(ds, rawDs){
+    if(!rawDs || ds.type==='pr') return null;
+    var g = ds.green;
+    if(!g) return null;
+    var seats   = rawDs.seats || 2;
+    var cands   = ds.candidates.slice(); // sorted by votes desc
+    var greenRk = -1;
+    for(var k=0;k<cands.length;k++){ if(cands[k].isGreen){ greenRk=k+1; break; } }
+    if(greenRk<0) return null;
+
+    var counting   = ds.countingRate || 0;
+    var gVotes     = g.votes;
+    var gPct       = g.pct;
+    var inZone     = greenRk <= seats;
+    var totCounted = cands.reduce(function(s,c){return s+c.votes;},0);
+
+    // 잔여 투표수 추정: 지금까지 집계된 표 / 개표율 * (100-개표율)
+    var remaining  = counting>0 ? Math.round(totCounted/counting*(100-counting)) : 0;
+
+    // 경쟁 상대: 당선권 바로 바깥 후보 (0-indexed: seats번째)
+    var rival = cands[seats] || null; // 3rd place for 2-seat
+    var rVotes = rival ? rival.votes : 0;
+    var rPct   = rival ? rival.pct   : 0;
+
+    var gapVotes = gVotes - rVotes; // 양수=녹색 우세, 음수=열세
+    var gapPct   = gPct   - rPct;
+
+    var label, color, conf;
+
+    if(counting<=0){
+      label='집계전'; color='#9ca3af'; conf=0;
+    } else if(counting>=99.9){
+      if(inZone){ label='당선 확정'; color='#00a167'; conf=100; }
+      else       { label='낙선 확정'; color='#dc2626'; conf=0;   }
+    } else if(inZone){
+      if(gapVotes>remaining){
+        label='당선 확실'; color='#00794d'; conf=98;
+      } else if(counting>=70&&gapPct>=8){
+        label='당선 확실'; color='#00794d'; conf=95;
+      } else if(counting>=50&&gapPct>=5 || counting>=30&&gapPct>=12){
+        label='당선 유력'; color='#059669'; conf=80;
+      } else if(counting>=20&&gapPct>=2){
+        label='당선 접전'; color='#f59e0b'; conf=60;
+      } else {
+        label='경합';     color='#f59e0b'; conf=55;
+      }
+    } else {
+      return null; // 낙선권은 표기하지 않음
+    }
+
+    // 상세 텍스트
+    var detail = counting<=0 ? '개표 시작 전' :
+      counting>=99.9 ? '개표 완료' :
+      (counting.toFixed(1)+'% 개표 · 현재 '+greenRk+'위 / '+seats+'인 선거구' +
+       (gapPct!==0 ? ' · '+(gapPct>0?'+':'')+gapPct.toFixed(1)+'%p' : ''));
+
+    return {label:label, color:color, conf:conf, detail:detail,
+            rank:greenRk, seats:seats, inZone:inZone, gapPct:gapPct, counting:counting};
+  }
+
+  function renderPrediction(ds, rawDs){
+    var el = document.getElementById('aPred-'+ds.id);
+    if(!el) return;
+    var pred = calcGreenPrediction(ds, rawDs);
+    if(!pred){ el.style.display='none'; return; }
+    el.style.display='';
+    var tag    = document.getElementById('aPredTag-'+ds.id);
+    var rank   = document.getElementById('aPredRank-'+ds.id);
+    var detail = document.getElementById('aPredDetail-'+ds.id);
+    var bar    = document.getElementById('aPredBar-'+ds.id);
+    tag.textContent    = pred.label;
+    tag.style.background = pred.color;
+    rank.textContent   = pred.rank+'위 / '+pred.seats+'인';
+    detail.textContent = pred.detail;
+    bar.style.background = pred.color;
+    bar.style.width    = pred.conf+'%';
+  }
 
   /* ── 투표율 현황 ── */
   function fetchTurnout(){
