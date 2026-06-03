@@ -161,7 +161,7 @@
   .error-card-notice{padding:20px 18px;text-align:center;color:#dc2626;
     font-size:13px;font-weight:800;letter-spacing:-.03em}
 
-  .chat-bubble{position:fixed;bottom:28px;right:28px;z-index:8000;
+  .chat-bubble{position:fixed;top:100px;right:24px;z-index:8000;
     width:52px;height:52px;border-radius:50%;background:var(--accent);color:#fff;
     border:0;font-size:22px;cursor:pointer;display:grid;place-items:center;
     box-shadow:0 4px 18px #00a16744;transition:transform .18s,box-shadow .18s;font-family:inherit}
@@ -170,7 +170,7 @@
     background:#e0162b;color:#fff;font-size:10px;font-weight:900;display:none;
     align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--bg)}
   .chat-badge.show{display:flex}
-  .chat-panel{position:fixed;bottom:90px;right:28px;z-index:8001;
+  .chat-panel{position:fixed;top:162px;right:24px;z-index:8001;
     width:340px;height:480px;background:#fff;border-radius:18px;
     box-shadow:0 12px 48px #00000022;display:none;flex-direction:column;
     font-family:Pretendard,sans-serif;overflow:hidden;border:1px solid var(--line)}
@@ -1228,7 +1228,7 @@ function saveTurnoutManual(){
     if(d.ok){
       var el=document.getElementById('turnoutInfo');
       if(el) el.innerHTML='투표율 <b style="font-size:15px">'+rate.toFixed(1)+'%</b>'+
-        (asOf?'<br><span style="opacity:.7;font-weight:600;font-size:11px">'+asOf+' 기준 (수동)</span>':'<br><span style="opacity:.6;font-size:11px">(수동 입력)</span>');
+        (asOf?'<br><span style="opacity:.7;font-weight:600;font-size:11px">'+asOf+' 기준</span>':'');
     }
   })
   .catch(function(){ alert('저장 실패'); });
@@ -1574,8 +1574,7 @@ setInterval(fetchPhotos, 15000);
         var el=document.getElementById('turnoutInfo');
         if(!el) return;
         if(d.rate!=null){
-          var manualTag = d.manual ? '<br><span style="opacity:.6;font-size:10px">(수동 입력)</span>' :
-            (d.asOf ? '<br><span style="opacity:.7;font-weight:600;font-size:11px">'+d.asOf+' 기준</span>' : '');
+          var manualTag = d.asOf && !d.manual ? '<br><span style="opacity:.7;font-weight:600;font-size:11px">'+d.asOf+' 기준</span>' : '';
           el.innerHTML='투표율 <b style="font-size:15px">'+d.rate.toFixed(1)+'%</b>'+manualTag;
           // 관리자: 현재값 편집 필드에 미리 채우기
           if(isAdmin() && d.manual){
