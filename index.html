@@ -344,6 +344,7 @@ window.GBoard = (function () {
     {
       id:0, region:"경상북도 안동시", regionShort:"안동",
       title:"안동시 마선거구", typeLabel:"기초의회의원",
+      headerTitle:"경상북도 안동시",
       type:"local", seats:2, pace:1.02, finalTotal:28430,
       candidates:[
         {name:"권상도",  party:"국민의힘",     votes:9640,  isGreen:false},
@@ -356,6 +357,7 @@ window.GBoard = (function () {
     {
       id:1, region:"제주특별자치도", regionShort:"제주",
       title:"광역의회의원 비례대표", typeLabel:"광역 비례대표",
+      headerTitle:"제주특별자치도의회 비례대표", hideTypeLabel:true,
       type:"pr", threshold:5.0, prSeats:13, pace:0.92, finalTotal:305400,
       candidates:[
         {name:"더불어민주당", party:"더불어민주당", votes:116663, isGreen:false},
@@ -370,6 +372,7 @@ window.GBoard = (function () {
     {
       id:2, region:"서울특별시 강서구", regionShort:"강서",
       title:"강서구 라선거구", typeLabel:"기초의회의원",
+      headerTitle:"서울특별시 강서구",
       type:"local", seats:2, pace:1.08, finalTotal:19620,
       candidates:[
         {name:"최민서", party:"더불어민주당", votes:8044, isGreen:false},
@@ -1097,7 +1100,7 @@ setInterval(fetchPhotos, 15000);
         '<div class="c-head">'+
           '<div class="c-region" id="cRegion-'+ds.id+'"></div>'+
           '<span class="c-cons" id="aCons-'+ds.id+'"></span>'+
-          '<span class="c-type">'+ds.typeLabel+'</span>'+
+          (!ds.hideTypeLabel ? '<span class="c-type">'+ds.typeLabel+'</span>' : '')+
         '</div>'+
         '<div class="hero">'+
           '<div class="hero-photo-wrap">'+
@@ -1177,9 +1180,15 @@ setInterval(fetchPhotos, 15000);
       var g = ds.green;
       var rawDs = GBoard.rawDistricts().find(function(rd){ return rd.id===ds.id; });
 
-      // 헤더: 광역명(경상북도 / 제주특별자치도 / 서울특별시) + 선거구명
-      document.getElementById('cRegion-'+ds.id).textContent = ds.region.split(' ')[0];
-      document.getElementById('aCons-'+ds.id).textContent = ds.title;
+      // 헤더: headerTitle 강조, 제주는 region 숨김
+      var rawDs2 = GBoard.rawDistricts().find(function(rd){ return rd.id===ds.id; });
+      var regionEl = document.getElementById('cRegion-'+ds.id);
+      if(rawDs2 && rawDs2.hideTypeLabel){
+        regionEl.textContent = '';
+      } else {
+        regionEl.textContent = ds.region.split(' ')[0];
+      }
+      document.getElementById('aCons-'+ds.id).textContent = (rawDs2 && rawDs2.headerTitle) ? rawDs2.headerTitle : ds.title;
 
       // 영웅 이름: PR 선거구는 DISTRICTS의 candidateName 사용
       var heroName = '—';

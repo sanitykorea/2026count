@@ -116,10 +116,13 @@ def fetch_nec_data(election_code, city_code):
         'Origin':          BASE_URL,
     })
     try:
-        sess.get(
-            f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCCP09',
-            timeout=8
-        )
+        sess.get(BASE_URL + '/', timeout=6)
+    except Exception:
+        pass
+    show_url = f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCCP09'
+    try:
+        sess.get(show_url, timeout=8)
+        sess.headers.update({'Referer': show_url})
     except Exception:
         pass
 
@@ -393,13 +396,15 @@ def fetch_turnout_data(debug=False):
     """NEC 투표진행상황 페이지에서 전국 투표율을 가져온다."""
     sess = _nec_session()
 
-    # 세션 쿠키 획득
+    # 세션 쿠키 획득: 메인 → showDocument 순으로 방문해 브라우저 흐름 재현
     try:
-        sess.get(
-            f'{BASE_URL}/main/showDocument.xhtml'
-            f'?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCVP01',
-            timeout=8
-        )
+        sess.get(BASE_URL + '/', timeout=6)
+    except Exception:
+        pass
+    show_url = f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCVP01'
+    try:
+        sess.get(show_url, timeout=8)
+        sess.headers.update({'Referer': show_url})
     except Exception:
         pass
 
