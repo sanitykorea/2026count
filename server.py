@@ -9,9 +9,35 @@ from flask import Flask, jsonify, request, send_from_directory
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
+import threading
 import os
 
 app = Flask(__name__, static_folder=os.path.dirname(os.path.abspath(__file__)))
+
+# ── 채팅 ─────────────────────────────────────────────────────
+_chat_messages = []
+_chat_lock = threading.Lock()
+_chat_counter = 0
+
+# ── 채팅 모더레이션 ───────────────────────────────────────────
+_pinned_msg_id = None
+_blocked_ips   = set()
+_mod_lock = threading.Lock()
+
+
+def get_client_ip():
+    """프록시(Render, nginx 등) 뒤에서도 실제 클라이언트 IP를 반환."""
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.remote_addr or '0.0.0.0'
+
+# ── 서버사이드 공유 상태 ──────────────────────────────────────
+_photos = {}              # {0: 'data:image/...', 1: ..., 2: ...}
+_photos_lock = threading.Lock()
+
+_display_override = None  # None → NEC 크롤링 / list → 관리자 수동 오버라이드
+_override_lock = threading.Lock()
 
 # ── 관리자 비밀번호 (환경변수 ADMIN_PASSWORD 로 설정, 기본 green2026) ──
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'green2026')
@@ -106,6 +132,7 @@ def fetch_nec_data(election_code, city_code):
 
 
 def parse_html(html, election_code, city_code):
+    import re as _re
     soup = BeautifulSoup(html, 'html.parser')
     result = {
         'election_type': ELECTION_TYPES.get(str(election_code), ''),
@@ -116,7 +143,8 @@ def parse_html(html, election_code, city_code):
         'status':        'ok',
     }
 
-    if soup.find(string=lambda t: t and '조회 자료가 없습니다' in t):
+    no_data_strings = ['조회 자료가 없습니다', '집계된 자료가 없습니다', '해당 자료가 없습니다']
+    if any(soup.find(string=lambda t: t and s in t) for s in no_data_strings):
         result['status'] = 'no_data'
         result['message'] = '개표 자료가 없습니다.'
         return result
@@ -129,59 +157,91 @@ def parse_html(html, election_code, city_code):
 
     rows = table.find_all('tr')
 
-    # 후보자 헤더 파싱
+    def to_int(s):
+        try: return int(_re.sub(r'[^\d]', '', str(s)))
+        except: return 0
+    def to_float(s):
+        try: return float(str(s).strip())
+        except: return 0.0
+    def is_only_numeric(s):
+        return bool(_re.match(r'^[\d,\.]*$', s.strip()))
+
+    # ── 후보자 헤더 파싱 (개선) ──────────────────────────────
+    SKIP = {'구시군명','선거인수','투표수','무효투표수','무효','기권수','기권','계','소계',
+            '득표율','후보자','후보자명','선거구명','정당명','합계','읍면동명','정당·후보자'}
     candidates_found = []
-    skip_words = ['구시군명', '선거인수', '투표수', '무효', '기권', '계', '득표율', '후보자', '선거구명', '정당명']
     for row in rows:
         for th in row.find_all('th'):
             lines = [l.strip() for l in th.get_text(separator='\n').split('\n') if l.strip()]
-            if int(th.get('rowspan', 1)) == 1 and int(th.get('colspan', 1)) == 1 and len(lines) >= 2:
-                if not any(w in lines[0] for w in skip_words):
-                    candidates_found.append({'party': lines[0], 'name': lines[1]})
+            if len(lines) < 2:
+                continue
+            # 첫 줄·둘째 줄 모두 skip 단어 없어야 후보자 헤더로 인식
+            if any(w in lines[0] for w in SKIP) or any(w in lines[1] for w in SKIP):
+                continue
+            entry = {'party': lines[0], 'name': lines[1]}
+            if entry not in candidates_found:
+                candidates_found.append(entry)
     result['candidates'] = candidates_found
 
-    # 데이터 행 파싱 (득표수 행 + 득표율 행 쌍)
-    def to_int(s):
-        try: return int(str(s).replace(',', ''))
-        except: return 0
-    def to_float(s):
-        try: return float(s)
-        except: return 0.0
+    # ── 데이터 행 분류 ────────────────────────────────────────
+    # 첫 번째 td가 비어있거나 숫자만 있으면 득표율 행, 아니면 득표수 행
+    tagged = []
+    for row in rows:
+        tds = row.find_all('td')
+        if not tds:
+            continue
+        first = tds[0].get_text(strip=True)
+        tagged.append({'cells': tds, 'first': first,
+                       'is_pct_row': not first or is_only_numeric(first)})
 
-    data_rows = [r for r in rows if r.find('td') and not r.find('th')]
+    # ── 득표수·득표율 행 쌍 파싱 ─────────────────────────────
     i = 0
-    while i < len(data_rows):
-        cells = data_rows[i].find_all('td')
-        if not cells: i += 1; continue
-        name = cells[0].get_text(strip=True)
-        if not name or name.replace(',', '').isdigit(): i += 1; continue
+    while i < len(tagged):
+        row_info = tagged[i]
+        if row_info['is_pct_row']:
+            i += 1
+            continue
 
-        raw = [c.get_text(strip=True).replace(',', '') for c in cells[1:]]
+        cells = row_info['cells']
+        name  = row_info['first']
+        # 이름이 비어있거나 순수 숫자면 스킵
+        if not name or is_only_numeric(name):
+            i += 1
+            continue
+
+        raw = [c.get_text(strip=True) for c in cells[1:]]
+
+        # 다음 행이 득표율 행인지 확인
         pct_raw = []
-        if i + 1 < len(data_rows):
-            nc = data_rows[i+1].find_all('td')
-            nv = [c.get_text(strip=True) for c in nc]
-            first = nv[0] if nv else ''
-            if not first or first.replace('.','').replace(',','').isdigit():
-                pct_raw = nv[1:] if first == '' else nv
-                i += 2
-            else:
-                i += 1
+        if i + 1 < len(tagged) and tagged[i + 1]['is_pct_row']:
+            pct_cells = tagged[i + 1]['cells']
+            pct_vals  = [c.get_text(strip=True) for c in pct_cells]
+            # 첫 셀이 비어있으면 offset 제거
+            pct_raw = pct_vals[1:] if (pct_vals and not pct_vals[0]) else pct_vals
+            i += 2
         else:
             i += 1
 
-        voter  = to_int(raw[0]) if len(raw) > 0 else 0
-        total  = to_int(raw[1]) if len(raw) > 1 else 0
-        cands  = []
+        voter = to_int(raw[0]) if len(raw) > 0 else 0
+        total = to_int(raw[1]) if len(raw) > 1 else 0
+
+        cands = []
         for j, cand in enumerate(candidates_found):
-            idx = j + 2
-            cands.append({
-                'party': cand['party'],
-                'name':  cand['name'],
-                'votes': to_int(raw[idx]) if idx < len(raw) else 0,
-                'pct':   to_float(pct_raw[j]) if j < len(pct_raw) else 0.0,
-            })
-        result['districts'].append({'name': name, 'voter_count': voter, 'total_votes': total, 'candidates': cands})
+            idx   = j + 2
+            votes = to_int(raw[idx]) if idx < len(raw) else 0
+            # 득표율: pct_raw 우선, 없으면 직접 계산
+            if j < len(pct_raw) and pct_raw[j]:
+                pct = to_float(pct_raw[j])
+                if pct == 0.0 and total > 0 and votes > 0:
+                    pct = round(votes / total * 100, 2)
+            elif total > 0 and votes > 0:
+                pct = round(votes / total * 100, 2)
+            else:
+                pct = 0.0
+            cands.append({'party': cand['party'], 'name': cand['name'],
+                          'votes': votes, 'pct': pct})
+        result['districts'].append({'name': name, 'voter_count': voter,
+                                    'total_votes': total, 'candidates': cands})
     return result
 
 
@@ -191,7 +251,11 @@ def api_gboard():
     """
     GBoard crawl 모드용 JSON 반환.
     형식: [{ "id": 0, "countingRate": 64.5, "status": "개표중", "candidates": [...] }, ...]
+    관리자 오버라이드가 설정된 경우 해당 데이터를 우선 반환.
     """
+    with _override_lock:
+        if _display_override is not None:
+            return jsonify(_display_override)
     result = []
     for dc in GBOARD_DISTRICTS:
         try:
@@ -316,28 +380,58 @@ def fetch_turnout_data():
     if m:
         result['asOf'] = m.group(0).strip()
 
+    import re as _re
+
+    # ── 투표율 컬럼 인덱스 찾기 ──────────────────────────────
     table = soup.find('table', class_='table01') or soup.find('table')
     if not table:
         result['status'] = 'no_data'
         return result
 
-    # 전국 합계 행에서 투표율(%) 추출
     rows = table.find_all('tr')
+    rate_col_idx = None
+    for row in rows:
+        ths = row.find_all('th')
+        for i, th in enumerate(ths):
+            if '투표율' in th.get_text():
+                rate_col_idx = i
+                break
+        if rate_col_idx is not None:
+            break
+
+    # ── 데이터 행에서 투표율 추출 ────────────────────────────
     for row in rows:
         cells = row.find_all('td')
+        if not cells:
+            continue
         row_text = ' '.join(c.get_text(strip=True) for c in cells)
-        if '전국' in row_text or '합계' in row_text or (len(cells) >= 3 and result['rate'] is None):
-            for cell in cells:
+        is_total = any(w in row_text for w in ['전국', '합계', '소계'])
+
+        # 컬럼 인덱스를 알면 해당 셀 직접 접근
+        if rate_col_idx is not None and rate_col_idx < len(cells):
+            t = cells[rate_col_idx].get_text(strip=True).replace(',', '')
+            try:
+                val = float(t)
+                if 0.0 < val <= 100.0:
+                    result['rate'] = val
+                    if is_total:
+                        break
+                    continue
+            except Exception:
+                pass
+
+        # fallback: 행 내 모든 셀에서 퍼센트처럼 보이는 값 탐색
+        if is_total or result['rate'] is None:
+            for cell in reversed(cells):  # 투표율은 보통 뒷 컬럼
                 t = cell.get_text(strip=True).replace(',', '')
-                if '.' in t and '%' not in t:
-                    try:
-                        val = float(t)
-                        if 0 <= val <= 100:
-                            result['rate'] = val
+                m = _re.match(r'^(\d{1,3}\.\d+)$', t)
+                if m:
+                    val = float(m.group(1))
+                    if 0.0 < val <= 100.0:
+                        result['rate'] = val
+                        if is_total:
                             break
-                    except Exception:
-                        pass
-            if result['rate'] is not None:
+            if is_total and result['rate'] is not None:
                 break
 
     return result
@@ -353,6 +447,177 @@ def api_turnout():
                 'rate': None, 'asOf': None}
     return jsonify(data)
 
+
+def _safe_msg(m):
+    """_ip 등 내부 필드를 제거한 클라이언트용 메시지 dict."""
+    return {k: v for k, v in m.items() if not k.startswith('_')}
+
+@app.route('/api/chat', methods=['GET'])
+def api_chat_get():
+    since = int(request.args.get('since', 0))
+    with _chat_lock:
+        msgs   = [_safe_msg(m) for m in _chat_messages if m['id'] > since and not m.get('deleted')]
+        pinned = None
+        with _mod_lock:
+            if _pinned_msg_id:
+                raw = next((m for m in _chat_messages
+                            if m['id'] == _pinned_msg_id and not m.get('deleted')), None)
+                pinned = _safe_msg(raw) if raw else None
+    return jsonify({'messages': msgs, 'pinned': pinned})
+
+@app.route('/api/chat', methods=['POST', 'OPTIONS'])
+def api_chat_post():
+    if request.method == 'OPTIONS':
+        return '', 204
+    global _chat_counter
+    data = request.get_json(silent=True) or {}
+    nick = (data.get('nick') or '익명').strip()[:20] or '익명'
+    text = (data.get('text') or '').strip()[:300]
+    if not text:
+        return jsonify({'ok': False, 'error': '내용 없음'}), 400
+    client_ip = get_client_ip()
+    with _mod_lock:
+        if client_ip in _blocked_ips:
+            return jsonify({'ok': False, 'error': '차단된 사용자'}), 403
+    is_admin = (data.get('password', '') == ADMIN_PASSWORD)
+    with _chat_lock:
+        _chat_counter += 1
+        msg = {
+            'id':      _chat_counter,
+            'nick':    nick,
+            'text':    text,
+            'time':    datetime.now().strftime('%H:%M'),
+            'isAdmin': is_admin,
+            '_ip':     client_ip,  # 서버 내부 전용, GET 응답에는 미포함
+        }
+        _chat_messages.append(msg)
+        if len(_chat_messages) > 300:
+            _chat_messages.pop(0)
+    return jsonify({'ok': True, 'id': _chat_counter})
+
+
+def _require_admin(data):
+    return (data or {}).get('password', '') == ADMIN_PASSWORD
+
+
+@app.route('/api/chat/<int:msg_id>', methods=['DELETE', 'OPTIONS'])
+def api_chat_delete(msg_id):
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json(silent=True) or {}
+    if not _require_admin(data):
+        return jsonify({'ok': False}), 403
+    with _chat_lock:
+        for m in _chat_messages:
+            if m['id'] == msg_id:
+                m['deleted'] = True
+                break
+    return jsonify({'ok': True})
+
+
+@app.route('/api/chat/pin', methods=['POST', 'OPTIONS'])
+def api_chat_pin():
+    if request.method == 'OPTIONS':
+        return '', 204
+    global _pinned_msg_id
+    data = request.get_json(silent=True) or {}
+    if not _require_admin(data):
+        return jsonify({'ok': False}), 403
+    with _mod_lock:
+        _pinned_msg_id = data.get('id')  # None이면 핀 해제
+    return jsonify({'ok': True})
+
+
+@app.route('/api/chat/block', methods=['POST', 'OPTIONS'])
+def api_chat_block():
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json(silent=True) or {}
+    if not _require_admin(data):
+        return jsonify({'ok': False}), 403
+    action = data.get('action', 'block')  # 'block' | 'unblock'
+
+    target_ip = None
+    if 'msgId' in data:
+        # 메시지 ID로 IP 조회
+        with _chat_lock:
+            msg = next((m for m in _chat_messages if m['id'] == int(data['msgId'])), None)
+        if not msg:
+            return jsonify({'ok': False, 'error': '메시지 없음'}), 404
+        target_ip = msg.get('_ip')
+    elif 'ip' in data:
+        target_ip = data['ip'].strip()
+
+    if not target_ip:
+        return jsonify({'ok': False, 'error': 'IP를 특정할 수 없음'}), 400
+
+    with _mod_lock:
+        if action == 'block':
+            _blocked_ips.add(target_ip)
+        else:
+            _blocked_ips.discard(target_ip)
+    return jsonify({'ok': True, 'ip': target_ip, 'action': action,
+                    'blocked_count': len(_blocked_ips)})
+
+
+@app.route('/api/chat/blocked', methods=['GET'])
+def api_chat_blocked():
+    pw = request.args.get('password', '')
+    if pw != ADMIN_PASSWORD:
+        return jsonify({'ok': False}), 403
+    with _mod_lock:
+        return jsonify({'blocked_ips': sorted(_blocked_ips)})
+
+
+# ── 사진 (서버사이드 공유) ────────────────────────────────────
+@app.route('/api/photos', methods=['GET'])
+def api_photos_get():
+    with _photos_lock:
+        return jsonify(_photos)
+
+
+@app.route('/api/photos/<int:photo_id>', methods=['POST', 'DELETE', 'OPTIONS'])
+def api_photo_set(photo_id):
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json(silent=True) or {}
+    if not _require_admin(data):
+        return jsonify({'ok': False}), 403
+    with _photos_lock:
+        if request.method == 'DELETE':
+            _photos.pop(photo_id, None)
+        else:
+            _photos[photo_id] = data.get('data', '')
+    return jsonify({'ok': True})
+
+
+# ── 디스플레이 오버라이드 (관리자 수동 데이터 전체 브로드캐스트) ──
+@app.route('/api/override', methods=['GET'])
+def api_override_get():
+    with _override_lock:
+        if _display_override is None:
+            return jsonify({'active': False})
+        return jsonify({'active': True})
+
+
+@app.route('/api/override', methods=['POST', 'DELETE', 'OPTIONS'])
+def api_override_set():
+    if request.method == 'OPTIONS':
+        return '', 204
+    global _display_override
+    data = request.get_json(silent=True) or {}
+    if not _require_admin(data):
+        return jsonify({'ok': False}), 403
+    if request.method == 'DELETE':
+        with _override_lock:
+            _display_override = None
+        return jsonify({'ok': True})
+    payload = data.get('payload')
+    if not payload:
+        return jsonify({'ok': False, 'error': 'payload 없음'}), 400
+    with _override_lock:
+        _display_override = payload
+    return jsonify({'ok': True})
 
 @app.route('/')
 def index():

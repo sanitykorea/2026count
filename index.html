@@ -146,6 +146,79 @@
     font-size:11.5px;font-weight:600;color:var(--ink-soft);display:flex;justify-content:space-between;
     flex-wrap:wrap;gap:6px;opacity:.85}
 
+  /* ── 채팅 ── */
+  .chat-bubble{position:fixed;bottom:28px;right:28px;z-index:8000;
+    width:52px;height:52px;border-radius:50%;background:var(--accent);color:#fff;
+    border:0;font-size:22px;cursor:pointer;display:grid;place-items:center;
+    box-shadow:0 4px 18px #00a16744;transition:transform .18s,box-shadow .18s;font-family:inherit}
+  .chat-bubble:hover{transform:scale(1.08);box-shadow:0 6px 24px #00a16766}
+  .chat-badge{position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;border-radius:999px;
+    background:#e0162b;color:#fff;font-size:10px;font-weight:900;display:none;
+    align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--bg)}
+  .chat-badge.show{display:flex}
+  .chat-panel{position:fixed;bottom:90px;right:28px;z-index:8001;
+    width:340px;height:480px;background:#fff;border-radius:18px;
+    box-shadow:0 12px 48px #00000022;display:none;flex-direction:column;
+    font-family:Pretendard,sans-serif;overflow:hidden;border:1px solid var(--line)}
+  .chat-panel.open{display:flex}
+  .chat-head{padding:14px 16px;background:var(--ink);color:#fff;
+    display:flex;align-items:center;gap:10px;flex-shrink:0}
+  .chat-head-title{font-weight:800;font-size:14px;letter-spacing:-.04em;flex:1}
+  .chat-head-sub{font-size:10.5px;opacity:.65;font-weight:600}
+  .chat-x{appearance:none;border:0;background:transparent;color:#fff;font-size:18px;
+    cursor:pointer;padding:2px 6px;border-radius:6px;opacity:.7;line-height:1}
+  .chat-x:hover{opacity:1}
+  .chat-nick-bar{padding:10px 14px;border-bottom:1px solid var(--line-soft);
+    display:flex;align-items:center;gap:8px;flex-shrink:0;background:#fafaf8}
+  .chat-nick-bar label{font-size:11px;font-weight:700;color:var(--ink-soft);white-space:nowrap}
+  .chat-nick-in{flex:1;font-family:inherit;font-size:12px;font-weight:600;
+    border:1.5px solid #2217141f;border-radius:8px;padding:5px 9px;color:var(--ink);min-width:0}
+  .chat-nick-in:focus{outline:none;border-color:var(--accent)}
+  .chat-msgs{flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:7px}
+  .chat-msg{max-width:88%}
+  .chat-msg.me{align-self:flex-end}
+  .chat-msg-meta{font-size:10px;font-weight:700;color:var(--ink-soft);margin-bottom:2px;
+    display:flex;align-items:center;gap:5px}
+  .chat-msg.me .chat-msg-meta{justify-content:flex-end}
+  .chat-admin-tag{background:var(--accent);color:#fff;font-size:9px;font-weight:900;
+    padding:1px 5px;border-radius:4px;letter-spacing:-.01em}
+  .chat-bubble-msg{display:inline-block;padding:7px 11px;border-radius:12px;
+    font-size:13px;font-weight:600;line-height:1.45;word-break:break-word;
+    background:#f0f0ea;color:var(--ink)}
+  .chat-msg.me .chat-bubble-msg{background:var(--accent);color:#fff}
+  .chat-msg.admin-msg .chat-bubble-msg{background:var(--ink);color:#fff}
+  .chat-msg.admin-msg.me .chat-bubble-msg{background:var(--accent-deep);color:#fff}
+  .chat-time{font-size:9.5px;font-weight:600;color:var(--ink-soft);margin-top:2px;opacity:.7}
+  .chat-msg.me .chat-time{text-align:right}
+  .chat-input-bar{padding:10px 12px;border-top:1px solid var(--line-soft);
+    display:flex;gap:8px;align-items:flex-end;flex-shrink:0;background:#fafaf8}
+  .chat-text-in{flex:1;font-family:inherit;font-size:13px;font-weight:600;
+    border:1.5px solid #2217141f;border-radius:10px;padding:8px 11px;
+    resize:none;height:38px;max-height:90px;color:var(--ink);line-height:1.4;overflow-y:auto}
+  .chat-text-in:focus{outline:none;border-color:var(--accent)}
+  .chat-send{appearance:none;border:0;background:var(--accent);color:#fff;
+    border-radius:10px;width:38px;height:38px;font-size:16px;cursor:pointer;
+    flex-shrink:0;display:grid;place-items:center;transition:.15s}
+  .chat-send:hover{background:var(--accent-deep)}
+  .chat-send:disabled{opacity:.4;cursor:default}
+  .chat-empty{text-align:center;color:var(--ink-soft);font-size:12px;font-weight:600;
+    opacity:.7;margin:auto;padding:20px 0}
+  .chat-pinned{background:#f0fdf4;border-bottom:1px solid #86efac55;padding:8px 14px;
+    font-size:12px;flex-shrink:0;display:none}
+  .chat-pinned.show{display:block}
+  .chat-pinned-label{font-size:10px;font-weight:900;color:var(--accent-deep);
+    display:flex;align-items:center;gap:5px;margin-bottom:3px}
+  .chat-pinned-text{font-weight:600;color:var(--ink);line-height:1.4;word-break:break-word}
+  .chat-pinned-nick{font-size:10px;color:var(--ink-soft);margin-top:2px;font-weight:600}
+  .chat-mod{display:none;gap:4px;margin-top:4px}
+  .admin-active .chat-mod{display:flex}
+  .chat-mod-btn{appearance:none;border:1.5px solid #2217141a;background:transparent;
+    font-family:inherit;font-size:10px;font-weight:700;color:var(--ink-soft);
+    padding:2px 7px;border-radius:5px;cursor:pointer;transition:.15s}
+  .chat-mod-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .chat-mod-btn.del:hover{border-color:#e0162b;color:#e0162b}
+  .chat-mod-btn.block-btn:hover{border-color:#c2410c;color:#c2410c}
+
   /* admin login modal */
   .al-modal{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;
     background:#221714bb;backdrop-filter:blur(4px);font-family:Pretendard,sans-serif}
@@ -188,7 +261,41 @@
 
 <footer class="foot">
   <span id="footTime"></span>
+  <button id="adminLoginBtn" onclick="openAdminModal()" style="appearance:none;border:0;background:transparent;
+    font-family:inherit;font-size:11px;font-weight:600;color:#2217143a;cursor:pointer;padding:2px 6px;
+    border-radius:6px;transition:.15s" onmouseover="this.style.color='#22171488'" onmouseout="this.style.color='#2217143a'">관리자</button>
 </footer>
+
+<!-- 채팅 -->
+<button class="chat-bubble" id="chatBubble" title="실시간 채팅">
+  💬
+  <span class="chat-badge" id="chatBadge"></span>
+</button>
+<div class="chat-panel" id="chatPanel">
+  <div class="chat-head">
+    <div>
+      <div class="chat-head-title">실시간 채팅</div>
+      <div class="chat-head-sub" id="chatOnline">연결 중…</div>
+    </div>
+    <button class="chat-x" id="chatClose">×</button>
+  </div>
+  <div class="chat-nick-bar">
+    <label for="chatNickIn">닉네임</label>
+    <input class="chat-nick-in" id="chatNickIn" maxlength="20" placeholder="닉네임 입력" autocomplete="off" />
+  </div>
+  <div class="chat-pinned" id="chatPinned">
+    <div class="chat-pinned-label">📌 고정 메시지</div>
+    <div class="chat-pinned-text" id="chatPinnedText"></div>
+    <div class="chat-pinned-nick" id="chatPinnedNick"></div>
+  </div>
+  <div class="chat-msgs" id="chatMsgs">
+    <div class="chat-empty">첫 메시지를 남겨보세요 👋</div>
+  </div>
+  <div class="chat-input-bar">
+    <textarea class="chat-text-in" id="chatTextIn" placeholder="메시지 입력…" rows="1" maxlength="300"></textarea>
+    <button class="chat-send" id="chatSend">➤</button>
+  </div>
+</div>
 
 <!-- 관리자 로그인 모달 -->
 <div class="al-modal" id="adminModal">
@@ -651,7 +758,12 @@ window.GPanel = (function () {
 
     bDemo.onclick=function(){GBoard.setMode("demo");};
     bMan.onclick=function(){GBoard.setMode("manual");};
-    bCrawl.onclick=function(){GBoard.setMode("crawl");};
+    bCrawl.onclick=function(){
+      GBoard.setMode("crawl");
+      // 크롤 모드 전환 시 수동 오버라이드 해제
+      fetch('/api/override',{method:'DELETE',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({password:ADMIN_PW_CACHE})}).catch(function(){});
+    };
     bPlay.onclick=function(){GBoard.togglePlay();};
     bReset.onclick=function(){GBoard.resetDemo();};
     bRefresh.onclick=function(){GBoard.forceRefresh();spin(bRefresh);};
@@ -733,6 +845,25 @@ window.GPanel = (function () {
         else byD[di].candidates[+inp.dataset.c].votes=+inp.value||0;
       });
       Object.keys(byD).forEach(function(id){GBoard.setManual(+id,byD[id]);});
+
+      // 서버 오버라이드 업데이트 → 모든 클라이언트에 반영
+      var payload=Object.keys(byD).map(function(id){
+        var d=byD[id];
+        var total=d.candidates.reduce(function(s,c){return s+(+c.votes||0);},0);
+        var cands=d.candidates.map(function(c){
+          return {name:c.name,party:c.party,votes:+c.votes||0,
+                  pct:total>0?(+c.votes||0)/total*100:0,isGreen:!!c.isGreen};
+        });
+        cands.sort(function(a,b){return b.votes-a.votes;});
+        cands.forEach(function(c,i){c.rank=i+1;});
+        var rate=Math.max(0,Math.min(100,+d.countingRate||0));
+        return {id:+id,countingRate:rate,
+                status:rate<0.5?'집계전':rate<99.5?'개표중':'개표완료',
+                candidates:cands};
+      });
+      fetch('/api/override',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({password:ADMIN_PW_CACHE,payload:payload})})
+      .catch(function(){});
     }
     modal._render=render;modal._save=saveAll;
   }
@@ -824,6 +955,7 @@ function submitAdminLogin(){
     .then(function(data){
       if(data.ok){
         sessionStorage.setItem(ADMIN_KEY, '1');
+        sessionStorage.setItem(ADMIN_KEY+'_pw', pw);  // 비밀번호 캐시 (세션 한정)
         closeAdminModal();
         location.reload();
       } else {
@@ -849,13 +981,16 @@ document.getElementById('brandLogo').addEventListener('dblclick', function(){ if
   var ci = document.getElementById('controlsIn');
   if(isAdmin()){
     document.body.classList.add('admin-active');
+    ADMIN_PW_CACHE = sessionStorage.getItem(ADMIN_KEY+'_pw') || '';
     GPanel.mount(ci);
   } else {
     document.querySelector('.controls').style.display = 'none';
   }
 })();
 
-/* ── 후보 사진 업로드 ─────────────────────────────────────── */
+/* ── 후보 사진 업로드 (서버 저장 → 전체 동기화) ─────────── */
+var ADMIN_PW_CACHE = '';  // 로그인 시 캐시
+
 function triggerPhotoUpload(id){
   document.getElementById('aPhotoFile-'+id).click();
 }
@@ -864,13 +999,41 @@ function handlePhotoUpload(id, input){
   if(!file) return;
   var reader = new FileReader();
   reader.onload = function(e){
-    var url = e.target.result;
-    localStorage.setItem('gboard.photo.'+id, url);
-    var ph = document.getElementById('aPhoto-'+id);
-    if(ph) ph.innerHTML = '<img src="'+url+'">';
+    var dataUrl = e.target.result;
+    // 서버에 업로드
+    fetch('/api/photos/'+id, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password: ADMIN_PW_CACHE, data: dataUrl})
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.ok){
+        var ph = document.getElementById('aPhoto-'+id);
+        if(ph) ph.innerHTML = '<img src="'+dataUrl+'">';
+      }
+    })
+    .catch(function(){});
   };
   reader.readAsDataURL(file);
 }
+
+// 서버에서 사진 불러오기 (모든 클라이언트 공통)
+function fetchPhotos(){
+  fetch('/api/photos', {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(photos){
+      Object.keys(photos).forEach(function(id){
+        var ph = document.getElementById('aPhoto-'+id);
+        if(ph && photos[id]){
+          ph.innerHTML = '<img src="'+photos[id]+'">';
+        }
+      });
+    })
+    .catch(function(){});
+}
+fetchPhotos();
+setInterval(fetchPhotos, 15000);
 
 /* ── 메인 렌더 ────────────────────────────────────────────── */
 (function(){
@@ -922,11 +1085,6 @@ function handlePhotoUpload(id, input){
       grid.appendChild(card);
     });
     built = true;
-    // 저장된 후보 사진 복원
-    [0,1,2].forEach(function(id){
-      var url = localStorage.getItem('gboard.photo.'+id);
-      if(url){ var ph=document.getElementById('aPhoto-'+id); if(ph) ph.innerHTML='<img src="'+url+'">'; }
-    });
   }
 
   /* 제주 의석 배분 렌더 */
@@ -1081,6 +1239,177 @@ function handlePhotoUpload(id, input){
   }
   fetchTurnout();
   setInterval(fetchTurnout, 5*60*1000);
+})();
+</script>
+<script>
+/* ── 실시간 채팅 ─────────────────────────────────────────── */
+(function(){
+  var NICK_KEY  = 'gboard.chat.nick';
+  var panel     = document.getElementById('chatPanel');
+  var bubble    = document.getElementById('chatBubble');
+  var badge     = document.getElementById('chatBadge');
+  var msgs      = document.getElementById('chatMsgs');
+  var nickIn    = document.getElementById('chatNickIn');
+  var textIn    = document.getElementById('chatTextIn');
+  var sendBtn   = document.getElementById('chatSend');
+  var onlineEl  = document.getElementById('chatOnline');
+  var pinnedEl  = document.getElementById('chatPinned');
+  var pinnedTxt = document.getElementById('chatPinnedText');
+  var pinnedNick= document.getElementById('chatPinnedNick');
+
+  var lastId  = 0;
+  var unread  = 0;
+  var open    = false;
+  var myNick  = localStorage.getItem(NICK_KEY) || '';
+  var currentPinnedId = null;
+
+  nickIn.value = myNick;
+  nickIn.addEventListener('change', function(){
+    myNick = nickIn.value.trim();
+    localStorage.setItem(NICK_KEY, myNick);
+  });
+
+  /* ── 열기/닫기 ── */
+  bubble.addEventListener('click', function(){ open ? closeChat() : openChat(); });
+  document.getElementById('chatClose').addEventListener('click', closeChat);
+
+  function openChat(){
+    open = true;
+    panel.classList.add('open');
+    bubble.style.background = 'var(--accent-deep)';
+    unread = 0; badge.textContent = ''; badge.classList.remove('show');
+    scrollToBottom();
+    textIn.focus();
+  }
+  function closeChat(){
+    open = false;
+    panel.classList.remove('open');
+    bubble.style.background = '';
+  }
+
+  /* ── 핀 메시지 렌더 ── */
+  function renderPinned(p){
+    if(!p || p.id === currentPinnedId && !p){ return; }
+    if(!p){ pinnedEl.classList.remove('show'); currentPinnedId=null; return; }
+    if(p.id === currentPinnedId) return;
+    currentPinnedId = p.id;
+    pinnedTxt.textContent  = p.text;
+    pinnedNick.textContent = p.nick + ' · ' + p.time;
+    pinnedEl.classList.add('show');
+  }
+  function clearPinned(){
+    currentPinnedId = null;
+    pinnedEl.classList.remove('show');
+  }
+
+  /* ── 메시지 렌더 ── */
+  function adminPost(path, body){
+    body.password = ADMIN_PW_CACHE;
+    return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  }
+
+  function renderMsg(m){
+    var isMine  = (m.nick === (myNick||'익명'));
+    var isAdmMsg= !!m.isAdmin;
+    var div = document.createElement('div');
+    div.className = 'chat-msg'+(isMine?' me':'')+(isAdmMsg?' admin-msg':'');
+    div.dataset.id = m.id;
+
+    var meta = document.createElement('div');
+    meta.className = 'chat-msg-meta';
+    if(isAdmMsg){ var tag=document.createElement('span'); tag.className='chat-admin-tag'; tag.textContent='관리자'; meta.appendChild(tag); }
+    var nickSpan=document.createElement('span'); nickSpan.textContent=m.nick; meta.appendChild(nickSpan);
+
+    var bub=document.createElement('div'); bub.className='chat-bubble-msg'; bub.textContent=m.text;
+
+    var timeEl=document.createElement('div'); timeEl.className='chat-time'; timeEl.textContent=m.time;
+
+    /* 관리자 모더레이션 버튼 */
+    var mod=document.createElement('div'); mod.className='chat-mod';
+
+    var isPinned = (m.id === currentPinnedId);
+    var pinBtn=document.createElement('button'); pinBtn.className='chat-mod-btn';
+    pinBtn.textContent=isPinned?'📌 핀 해제':'📌 핀';
+    pinBtn.onclick=function(){
+      var newId = isPinned ? null : m.id;
+      adminPost('/api/chat/pin',{id:newId}).then(function(){ poll(); });
+    };
+
+    var delBtn=document.createElement('button'); delBtn.className='chat-mod-btn del'; delBtn.textContent='삭제';
+    delBtn.onclick=function(){
+      if(!confirm('['+m.nick+'] 메시지를 삭제할까요?')) return;
+      fetch('/api/chat/'+m.id,{method:'DELETE',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({password:ADMIN_PW_CACHE})})
+      .then(function(){ div.remove(); });
+    };
+
+    var blockBtn=document.createElement('button'); blockBtn.className='chat-mod-btn block-btn'; blockBtn.textContent='IP 차단';
+    blockBtn.onclick=function(){
+      if(!confirm('['+m.nick+'] 의 IP를 차단할까요?\n(같은 IP에서 오는 모든 메시지 차단)')) return;
+      adminPost('/api/chat/block',{msgId:m.id,action:'block'})
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if(d.ok) alert('IP 차단됨: '+d.ip); });
+    };
+
+    mod.appendChild(pinBtn); mod.appendChild(delBtn); mod.appendChild(blockBtn);
+
+    div.appendChild(meta); div.appendChild(bub); div.appendChild(timeEl); div.appendChild(mod);
+    return div;
+  }
+
+  function appendMessages(list){
+    if(!list.length) return;
+    var wasEmpty=msgs.querySelector('.chat-empty');
+    if(wasEmpty) wasEmpty.remove();
+    var atBottom=msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight<60;
+    list.forEach(function(m){
+      if(document.querySelector('[data-id="'+m.id+'"]')) return;
+      msgs.appendChild(renderMsg(m));
+      lastId=Math.max(lastId,m.id);
+      if(!open){ unread++; badge.textContent=unread>99?'99+':unread; badge.classList.add('show'); }
+    });
+    if(atBottom||open) scrollToBottom();
+  }
+
+  function scrollToBottom(){ setTimeout(function(){ msgs.scrollTop=msgs.scrollHeight; },30); }
+
+  /* ── 폴링 ── */
+  function poll(){
+    fetch('/api/chat?since='+lastId,{cache:'no-store'})
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        onlineEl.textContent='연결됨';
+        /* 서버 응답: {messages:[...], pinned:{...}|null} */
+        var list   = Array.isArray(data) ? data : (data.messages||[]);
+        var pinned = Array.isArray(data) ? null  : data.pinned;
+        appendMessages(list);
+        if(pinned) renderPinned(pinned);
+        else clearPinned();
+      })
+      .catch(function(){ onlineEl.textContent='연결 끊김…'; });
+  }
+
+  poll();
+  setInterval(poll, 3000);
+
+  /* ── 전송 ── */
+  function send(){
+    var text=textIn.value.trim(); if(!text) return;
+    var nick=nickIn.value.trim()||'익명';
+    myNick=nick; localStorage.setItem(NICK_KEY,nick);
+    sendBtn.disabled=true;
+    var body={nick:nick,text:text};
+    if(isAdmin()) body.password=ADMIN_PW_CACHE;
+    fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if(d.ok){ textIn.value=''; textIn.style.height=''; poll(); } })
+      .catch(function(){})
+      .finally(function(){ sendBtn.disabled=false; textIn.focus(); });
+  }
+
+  sendBtn.addEventListener('click',send);
+  textIn.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} });
+  textIn.addEventListener('input',function(){ this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,90)+'px'; });
 })();
 </script>
 </body>
