@@ -544,30 +544,41 @@ def _nec_session():
 
 def _parse_turnout_from_soup(soup):
     """투표진행상황 HTML에서 전국 투표율(%) 추출. (rate, asOf) 반환."""
-    # 표의 마지막 컬럼이 투표율(%) — "합계" 행을 우선 사용
-    table = soup.find('table', class_='table01') or soup.find('table')
-    if not table:
+    # 전체 페이지 HTML 구조에서 '투표율' 헤더를 가진 테이블을 명시적으로 탐색
+    target_table = None
+    for t in soup.find_all('table'):
+        text = t.get_text()
+        if '투표율' in text and ('합계' in text or '서울' in text):
+            target_table = t
+            break
+
+    # fallback: class='table01' 또는 첫 번째 table
+    if not target_table:
+        target_table = soup.find('table', class_='table01') or soup.find('table')
+    if not target_table:
         return None, None
 
     rate = None
-    for row in table.find_all('tr'):
+    for row in target_table.find_all('tr'):
         cells = row.find_all('td')
         if not cells:
             continue
         first = cells[0].get_text(strip=True)
-        # 합계 행 우선, 없으면 첫 데이터 행
         is_total = '합계' in first
-        # 마지막 셀에서 "숫자%" 패턴 추출
-        last_cell = cells[-1].get_text(strip=True)
-        m = _re.search(r'(\d{1,3}\.\d+)\s*%?', last_cell)
-        if m:
-            v = float(m.group(1))
-            if 0.0 < v <= 100.0:
-                rate = v
-                if is_total:
-                    break  # 합계 행이면 바로 종료
 
-    # 기준시각: 현재 서버 시각 기준
+        # 모든 셀에서 "숫자%" 패턴 탐색 (끝에서부터)
+        for cell in reversed(cells):
+            cell_text = cell.get_text(strip=True)
+            m = _re.search(r'(\d{1,3}\.\d+)\s*%', cell_text)
+            if m:
+                v = float(m.group(1))
+                if 0.0 < v <= 100.0:
+                    rate = v
+                    if is_total:
+                        break
+        if is_total and rate is not None:
+            break
+
     asOf = datetime.now().strftime('%H:%M') + ' 기준'
     return rate, asOf
 
@@ -628,7 +639,8 @@ def fetch_turnout_data(debug=False):
                     'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 }
                 if debug:
-                    result['_html'] = r.text[:8000]
+                    # 테이블 텍스트만 반환 (전체 HTML 대신)
+                    result['_table'] = target_table.get_text(separator='\t', strip=True)[:3000] if target_table else ''
                 return result
 
             last_error = 'rate_not_found'
@@ -644,7 +656,17 @@ def fetch_turnout_data(debug=False):
         'message':   last_error,
     }
     if debug:
-        result['_html'] = last_html[:8000]
+        # 전체 HTML 대신 페이지 내 테이블들의 텍스트만 추출
+        try:
+            debug_soup = BeautifulSoup(last_html, 'html.parser')
+            tables_text = '\n===\n'.join(
+                t.get_text(separator='\t', strip=True)[:800]
+                for t in debug_soup.find_all('table')[:6]
+            )
+            result['_tables'] = tables_text
+            result['_html_len'] = len(last_html)
+        except Exception:
+            result['_html'] = last_html[:4000]
     return result
 
 
