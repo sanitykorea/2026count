@@ -343,7 +343,10 @@ def parse_html(html, election_code, city_code):
         'status':        'ok',
     }
 
-    no_data_strings = ['조회 자료가 없습니다', '집계된 자료가 없습니다', '해당 자료가 없습니다']
+    no_data_strings = [
+        '조회 자료가 없습니다', '집계된 자료가 없습니다',
+        '해당 자료가 없습니다', '검색된 결과가 없습니다',
+    ]
     if any(soup.find(string=lambda t: t and s in t) for s in no_data_strings):
         result['status'] = 'no_data'
         result['message'] = '개표 자료가 없습니다.'
