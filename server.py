@@ -92,16 +92,11 @@ GBOARD_DISTRICTS = [
         ],
     },
     {
-        'id': 1,  # 제주특별자치도 광역비례 (제주시+서귀포시 합산)
+        'id': 1,  # 제주특별자치도 광역비례 → VCCP09 시도 집계 사용
         'is_pr': True,
-        'posts': [
-            {'electionCode':'8', 'cityCode':'4900', 'sggCityCode':'-1',
-             'townCodeFromSgg':'-1', 'townCode':'4901', 'sggTownCode':'-1',
-             'checkCityCode':'-1', 'x':'84', 'y':'21'},
-            {'electionCode':'8', 'cityCode':'4900', 'sggCityCode':'-1',
-             'townCodeFromSgg':'-1', 'townCode':'4902', 'sggTownCode':'-1',
-             'checkCityCode':'-1', 'x':'57', 'y':'34'},
-        ],
+        'use_vccp09': True,          # VCCP08 개별 조회 대신 VCCP09 집계 사용
+        'election_code': 8,
+        'city_code': '4900',
     },
     {
         'id': 2,  # 서울특별시 강서구 라선거구
@@ -412,7 +407,15 @@ def parse_html(html, election_code, city_code):
             i += 1
             continue
 
-        raw = [c.get_text(strip=True) for c in cells[1:]]
+        # VCCP08 테이블은 district명 뒤에 빈 '구분' 컬럼이 있어 앞 공백 셀을 건너뜀
+        _raw_all = cells[1:]
+        _skip = 0
+        for _cell in _raw_all:
+            if _cell.get_text(strip=True) == '':
+                _skip += 1
+            else:
+                break
+        raw = [c.get_text(strip=True) for c in _raw_all[_skip:]]
 
         # 다음 행이 득표율 행인지 확인
         pct_raw = []
@@ -467,7 +470,26 @@ def api_gboard():
 
     def fetch_one(dc):
         try:
-            # 각 POST 파라미터로 조회 (제주는 2개)
+            if dc.get('use_vccp09'):
+                # 광역비례 등 VCCP09 시도 집계 방식
+                data = fetch_nec_data(dc['election_code'], dc['city_code'])
+                if data.get('status') != 'ok' or not data.get('districts'):
+                    return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
+                # 합계 행 또는 첫 번째 행 사용
+                dist = next((d for d in data['districts'] if '합계' in d['name']), data['districts'][0])
+                total  = dist['total_votes']
+                voters = dist['voter_count']
+                tot_c  = sum(c['votes'] for c in dist['candidates'])
+                rate   = round(min(100, tot_c / total * 100), 1) if total > 0 and tot_c > 0 else 0
+                status = '개표완료' if rate >= 99.9 else ('개표중' if tot_c > 0 else '집계전')
+                candidates = [
+                    {'name':c['name'],'party':c['party'],'votes':c['votes'],
+                     'pct':c.get('pct',0),'isGreen':'녹색당' in (c.get('party') or '')}
+                    for c in dist['candidates']
+                ]
+                return {'id': dc['id'], 'countingRate': rate, 'status': status, 'candidates': candidates}
+
+            # 일반 VCCP08 방식
             results = []
             for post_params in dc['posts']:
                 res = fetch_district_data(post_params)
@@ -722,9 +744,15 @@ def api_debug_gboard():
     result = []
     for dc in GBOARD_DISTRICTS:
         district_debug = {'id': dc['id'], 'posts': []}
-        for post_params in dc['posts']:
+        posts = dc.get('posts') or ([{'electionCode': dc.get('election_code'),
+                                       'cityCode': dc.get('city_code'), '_vccp09': True}]
+                                     if dc.get('use_vccp09') else [])
+        for post_params in posts:
             try:
-                data = fetch_district_data(post_params)
+                if post_params.get('_vccp09'):
+                    data = fetch_nec_data(dc['election_code'], dc['city_code'])
+                else:
+                    data = fetch_district_data(post_params)
                 # 파싱된 결과 요약
                 summary = {
                     'status':     data.get('status'),

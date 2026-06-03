@@ -390,6 +390,7 @@ window.GBoard = (function () {
       title:"광역의회의원 비례대표", typeLabel:"광역 비례대표",
       headerTitle:"제주특별자치도의회 비례대표", hideTypeLabel:true,
       type:"pr", threshold:5.0, prSeats:13, pace:1.0, finalTotal:0,
+      cityLabels:["제주시","서귀포시"],
       candidates:[
         {name:"더불어민주당", party:"더불어민주당", votes:0, isGreen:false, number:"1"},
         {name:"국민의힘",     party:"국민의힘",     votes:0, isGreen:false, number:"2"},
@@ -551,7 +552,10 @@ window.GBoard = (function () {
     cur.forEach(function(c,i){c.rank=i+1;});
     var rate=Math.max(0,Math.min(100,+m.countingRate||0));
     var status=m.status||(rate<0.5?"집계전":rate<99.5?"개표중":"개표완료");
-    return finalize(d,cur,rate,total,status);
+    var result=finalize(d,cur,rate,total,status);
+    result.invalidVotes=+m.invalidVotes||0;
+    result.voterCount=+m.voterCount||0;
+    return result;
   }
 
   /* ── 크롤링 ─────────────────────────────────────────────── */
@@ -562,6 +566,7 @@ window.GBoard = (function () {
       if(!row||row.id==null) return;
       map[row.id]={
         countingRate:+row.countingRate||0, status:row.status||null,
+        invalidVotes:+row.invalidVotes||0, voterCount:+row.voterCount||0,
         candidates:(row.candidates||[]).map(function(c){
           return { name:c.name||"", party:c.party||"",
                    votes:+c.votes||0,
@@ -620,7 +625,10 @@ window.GBoard = (function () {
     cur.forEach(function(c,i){c.rank=i+1;});
     var rate=Math.max(0,Math.min(100,+m.countingRate||0));
     var status=m.status||(rate<0.5?"집계전":rate<99.5?"개표중":"개표완료");
-    return finalize(d,cur,rate,total,status);
+    var result=finalize(d,cur,rate,total,status);
+    result.invalidVotes=+m.invalidVotes||0;
+    result.voterCount=+m.voterCount||0;
+    return result;
   }
 
   function snapOne(d){
@@ -941,41 +949,40 @@ window.GPanel = (function () {
                - (a.match(/(\d{1,3}(?:,\d{3})+|\d{4,})/g)||[]).length;
         });
 
+      // 여러 행(제주처럼 도시별 2행)을 누적 합산
+      var accVotes=result.candidates.map(function(){return 0;});
+      var accTotalVotes=0, rowsMatched=0;
+
       for(var li=0;li<candidates_lines.length;li++){
         var nums=(candidates_lines[li].match(/(\d{1,3}(?:,\d{3})*)/g)||[])
           .map(function(s){return parseInt(s.replace(/,/g,''));})
           .filter(function(v){return v>0;});
 
-        if(nums.length < 2+n) continue; // 숫자가 부족하면 건너뜀
+        if(nums.length < 2+n) continue;
 
-        // 후보 득표수 = nums[2 .. 2+n-1]
         var candVotes=nums.slice(2, 2+n);
 
-        // 검증: 합계(nums[2+n])가 있으면 득표수 합과 비교
+        // 검증: 합계값(nums[2+n])이 있으면 득표수 합과 10% 이내인지 확인
         if(nums.length > 2+n){
           var sum=candVotes.reduce(function(a,b){return a+b;},0);
           var declared=nums[2+n];
-          // 10% 이상 차이나면 잘못된 행
           if(Math.abs(sum-declared)/Math.max(declared,1)>0.1) continue;
         }
 
-        // 매핑
-        candVotes.forEach(function(v,i){
+        // 누적
+        candVotes.forEach(function(v,i){ accVotes[i]+=v; });
+        accTotalVotes += nums[1]||0;
+        rowsMatched++;
+      }
+
+      if(rowsMatched>0){
+        accVotes.forEach(function(v,i){
           if(i<result.candidates.length) result.candidates[i].votes=v;
         });
-
-        // 개표율 = (3번째~끝에서 두 번째까지 합) / 2번째(투표수)
-        // 즉, 집계된 표(후보 득표수 + 계 + 무효) / 투표수
-        // ※ '계' 컬럼이 포함돼 합이 투표수를 초과하면 캡(100%)
-        if(!result.countingRate && nums[1]>0 && nums.length>=4){
-          var counted=nums.slice(2, nums.length-1).reduce(function(a,b){return a+b;},0);
-          if(counted > nums[1] * 2){
-            // '계' 컬럼이 이중집계됐을 가능성 → 뒤에서 3,2번째(계+무효)만 사용
-            counted = nums[nums.length-3] + nums[nums.length-2];
-          }
-          result.countingRate=Math.min(100, Math.round(counted/nums[1]*1000)/10);
+        if(!result.countingRate && accTotalVotes>0){
+          var totalCand=accVotes.reduce(function(a,b){return a+b;},0);
+          result.countingRate=Math.min(100,Math.round(totalCand/accTotalVotes*1000)/10);
         }
-        break;
       }
       return result;
     }
@@ -996,18 +1003,73 @@ window.GPanel = (function () {
 
         /* ── 개별 입력 패널 ── */
         var panelManual=el("div","");
+
+        // 개표율
         var rate=el("div","gp-rate");rate.innerHTML='<label>개표율</label>';
         var ri=el("input","gp-num");ri.type="number";ri.step="0.1";ri.min="0";ri.max="100";
         ri.value=m.countingRate||0;ri.dataset.d=d.id;ri.dataset.k="rate";
         rate.appendChild(ri);rate.appendChild(el("span","gp-hint","%"));
         panelManual.appendChild(rate);
-        (m.candidates||[]).forEach(function(c,ci){
-          var row=el("div","gp-cand");
-          row.innerHTML='<div class="nm">'+c.name+(c.isGreen?' <span class="tag">녹색당</span>':' <span class="gp-hint">'+c.party+'</span>')+'</div>';
-          var vi=el("input","gp-num");vi.type="number";vi.min="0";vi.placeholder="득표수";
-          vi.value=c.votes||0;vi.dataset.d=d.id;vi.dataset.c=ci;
-          row.appendChild(vi);panelManual.appendChild(row);
-        });
+
+        // 선거인수
+        var rVoter=el("div","gp-rate");rVoter.innerHTML='<label>선거인수</label>';
+        var iVoter=el("input","gp-num");iVoter.type="number";iVoter.min="0";iVoter.placeholder="선거인수";
+        iVoter.value=m.voterCount||0;iVoter.dataset.d=d.id;iVoter.dataset.k="voterCount";
+        rVoter.appendChild(iVoter);rVoter.appendChild(el("span","gp-hint","명"));
+        panelManual.appendChild(rVoter);
+
+        // 무효투표수
+        var rInv=el("div","gp-rate");rInv.innerHTML='<label>무효투표수</label>';
+        var iInv=el("input","gp-num");iInv.type="number";iInv.min="0";iInv.placeholder="무효표";
+        iInv.value=m.invalidVotes||0;iInv.dataset.d=d.id;iInv.dataset.k="invalid";
+        rInv.appendChild(iInv);rInv.appendChild(el("span","gp-hint","표"));
+        panelManual.appendChild(rInv);
+
+        // 구분선
+        var sep=el("div","");sep.style.cssText="border-top:1px solid #2217140f;margin:8px 0 4px";
+        panelManual.appendChild(sep);
+
+        if(d.cityLabels && d.cityLabels.length > 1){
+          /* ── 도시별 분리 입력 (제주: 제주시 / 서귀포시) ── */
+          d.cityLabels.forEach(function(cityLabel, ci_city){
+            var cityData=(m.cityData&&m.cityData[ci_city])||{voterCount:0,invalidVotes:0,votes:{}};
+            var cityBox=el("div","");
+            cityBox.style.cssText="border:1px solid #2217140f;border-radius:10px;padding:10px 12px;margin-bottom:8px";
+            cityBox.innerHTML='<div style="font-size:12px;font-weight:800;color:var(--accent-deep);margin-bottom:8px">'+cityLabel+'</div>';
+
+            // 도시별 선거인수
+            var rvc=el("div","gp-rate");rvc.innerHTML='<label style="font-size:11px">선거인수</label>';
+            var ivc=el("input","gp-num");ivc.type="number";ivc.min="0";ivc.placeholder="선거인수";
+            ivc.value=cityData.voterCount||0;ivc.dataset.d=d.id;ivc.dataset.city=ci_city;ivc.dataset.k="cityVoter";
+            rvc.appendChild(ivc);rvc.appendChild(el("span","gp-hint","명"));cityBox.appendChild(rvc);
+
+            // 도시별 무효투표수
+            var ric=el("div","gp-rate");ric.innerHTML='<label style="font-size:11px">무효투표수</label>';
+            var iic=el("input","gp-num");iic.type="number";iic.min="0";iic.placeholder="무효표";
+            iic.value=cityData.invalidVotes||0;iic.dataset.d=d.id;iic.dataset.city=ci_city;iic.dataset.k="cityInvalid";
+            ric.appendChild(iic);ric.appendChild(el("span","gp-hint","표"));cityBox.appendChild(ric);
+
+            // 도시별 후보 득표수
+            (m.candidates||d.candidates).forEach(function(c,ci){
+              var row=el("div","gp-cand");
+              row.innerHTML='<div class="nm">'+c.name+(c.isGreen?' <span class="tag">녹색당</span>':' <span class="gp-hint">'+c.party+'</span>')+'</div>';
+              var vi=el("input","gp-num");vi.type="number";vi.min="0";vi.placeholder="득표수";
+              vi.value=(cityData.votes&&cityData.votes[ci])||0;
+              vi.dataset.d=d.id;vi.dataset.city=ci_city;vi.dataset.c=ci;
+              row.appendChild(vi);cityBox.appendChild(row);
+            });
+            panelManual.appendChild(cityBox);
+          });
+        } else {
+          /* ── 일반 단일 입력 ── */
+          (m.candidates||[]).forEach(function(c,ci){
+            var row=el("div","gp-cand");
+            row.innerHTML='<div class="nm">'+c.name+(c.isGreen?' <span class="tag">녹색당</span>':' <span class="gp-hint">'+c.party+'</span>')+'</div>';
+            var vi=el("input","gp-num");vi.type="number";vi.min="0";vi.placeholder="득표수";
+            vi.value=c.votes||0;vi.dataset.d=d.id;vi.dataset.c=ci;
+            row.appendChild(vi);panelManual.appendChild(row);
+          });
+        }
         box.appendChild(panelManual);
 
         /* ── 텍스트 붙여넣기 패널 ── */
@@ -1057,12 +1119,42 @@ window.GPanel = (function () {
       var byD={};
       GBoard.rawDistricts().forEach(function(d){
         var m=GBoard.getManual(d.id)||{candidates:d.candidates.map(function(c){return{name:c.name,party:c.party,isGreen:c.isGreen,votes:0};})};
-        byD[d.id]={countingRate:0,status:null,candidates:m.candidates.map(function(c){return{name:c.name,party:c.party,isGreen:c.isGreen,votes:0};})};
+        byD[d.id]={countingRate:0,voterCount:0,invalidVotes:0,status:null,
+                   cityData: d.cityLabels ? d.cityLabels.map(function(){return {voterCount:0,invalidVotes:0,votes:{}};}) : null,
+                   candidates:m.candidates.map(function(c){return{name:c.name,party:c.party,isGreen:c.isGreen,votes:0};})};
       });
       body.querySelectorAll("input").forEach(function(inp){
-        var di=+inp.dataset.d;
-        if(inp.dataset.k==="rate") byD[di].countingRate=+inp.value||0;
-        else byD[di].candidates[+inp.dataset.c].votes=+inp.value||0;
+        var di=+inp.dataset.d; if(isNaN(di)||!byD[di]) return;
+        var city=inp.dataset.city;
+        if(city!=null){
+          var ci_city=+city;
+          if(inp.dataset.k==="cityVoter")   byD[di].cityData[ci_city].voterCount=+inp.value||0;
+          else if(inp.dataset.k==="cityInvalid") byD[di].cityData[ci_city].invalidVotes=+inp.value||0;
+          else if(inp.dataset.c!=null)  byD[di].cityData[ci_city].votes[+inp.dataset.c]=(byD[di].cityData[ci_city].votes[+inp.dataset.c]||0)+(+inp.value||0);
+        } else {
+          if(inp.dataset.k==="rate")       byD[di].countingRate=+inp.value||0;
+          else if(inp.dataset.k==="voterCount") byD[di].voterCount=+inp.value||0;
+          else if(inp.dataset.k==="invalid")    byD[di].invalidVotes=+inp.value||0;
+          else if(inp.dataset.c!=null)     byD[di].candidates[+inp.dataset.c].votes=+inp.value||0;
+        }
+      });
+
+      // 도시별 데이터 합산 (제주)
+      GBoard.rawDistricts().forEach(function(d){
+        if(!d.cityLabels||!byD[d.id].cityData) return;
+        var totalVoter=0, totalInvalid=0;
+        var candVotes=byD[d.id].candidates.map(function(){return 0;});
+        byD[d.id].cityData.forEach(function(cd){
+          totalVoter+=cd.voterCount||0;
+          totalInvalid+=cd.invalidVotes||0;
+          Object.keys(cd.votes).forEach(function(ci){ candVotes[+ci]+=(cd.votes[ci]||0); });
+        });
+        byD[d.id].voterCount=totalVoter;
+        byD[d.id].invalidVotes=totalInvalid;
+        byD[d.id].candidates.forEach(function(c,i){ c.votes=candVotes[i]||0; });
+        // 도시별 원본 보존
+        var m=GBoard.getManual(d.id)||{};
+        m.cityData=byD[d.id].cityData;
       });
       Object.keys(byD).forEach(function(id){GBoard.setManual(+id,byD[id]);});
 
@@ -1078,6 +1170,8 @@ window.GPanel = (function () {
         cands.forEach(function(c,i){c.rank=i+1;});
         var rate=Math.max(0,Math.min(100,+d.countingRate||0));
         return {id:+id,countingRate:rate,
+                voterCount:+d.voterCount||0,
+                invalidVotes:+d.invalidVotes||0,
                 status:rate<0.5?'집계전':rate<99.5?'개표중':'개표완료',
                 candidates:cands};
       });
@@ -1534,8 +1628,9 @@ setInterval(fetchPhotos, 15000);
       var isError = ds.status==='데이터 수신 실패';
       st.className='c-status'+(ds.status==='개표완료'?' done':'')+(isError?' done':'');
       st.innerHTML='<span class="sd-dot" style="'+(isError?'background:#dc2626':'')+'"></span>'+ds.status;
-      document.getElementById('aTot-'+ds.id).textContent=
-        ds.totalVotes?'총 '+ds.totalVotes.toLocaleString()+(ds.type==='pr'?' (정당)':'표'):'';
+      var totText = ds.totalVotes ? '총 '+ds.totalVotes.toLocaleString()+(ds.type==='pr'?' (정당)':'표') : '';
+      if(ds.invalidVotes) totText += (totText?' · ':'') + '무효 '+ds.invalidVotes.toLocaleString()+'표';
+      document.getElementById('aTot-'+ds.id).textContent = totText;
 
       // 선거구별 모드 버튼 상태 업데이트 (관리자만 보임)
       var force = GBoard.getDistrictForce(ds.id);
