@@ -1591,6 +1591,28 @@ setInterval(fetchPhotos, 15000);
   }
   fetchTurnout();
   setInterval(fetchTurnout, 5*60*1000);
+
+  /* ── 모바일 백그라운드 복귀 시 즉시 갱신 ──────────────────
+     iOS/Android 브라우저는 백그라운드에서 폴링 타이머를 멈춤.
+     화면/탭이 다시 활성화되면 즉시 데이터를 새로 가져온다.
+  ── */
+  var _lastVisible = Date.now();
+  document.addEventListener('visibilitychange', function(){
+    if(document.hidden){ _lastVisible = Date.now(); return; }
+    var away = Date.now() - _lastVisible;
+    if(away > 5000){ // 5초 이상 자리 비웠으면 즉시 새로고침
+      GBoard.forceRefresh();
+      fetchTurnout();
+      fetchPhotos();
+    }
+  });
+  // iOS Safari는 visibilitychange 대신 pagehide/pageshow 사용
+  window.addEventListener('pageshow', function(e){
+    if(e.persisted){ // bfcache에서 복원된 경우
+      GBoard.forceRefresh();
+      fetchTurnout();
+    }
+  });
 })();
 </script>
 <script>
