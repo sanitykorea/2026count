@@ -300,6 +300,28 @@
 
 <main><div class="wrap"><div class="grid" id="grid"></div></div></main>
 
+<section style="background:var(--ink);color:#fff;padding:clamp(28px,4vw,48px) clamp(14px,3vw,40px)">
+  <div style="max-width:1480px;margin:0 auto;display:flex;gap:clamp(20px,4vw,60px);flex-wrap:wrap;align-items:stretch">
+    <div style="flex:1;min-width:240px;background:#ffffff12;border-radius:16px;padding:24px 26px">
+      <div style="font-size:11px;font-weight:800;color:var(--accent);letter-spacing:.04em;margin-bottom:8px">💚 녹색당 후원하기</div>
+      <div style="font-size:clamp(15px,1.6vw,19px);font-weight:900;letter-spacing:-.04em;line-height:1.35;margin-bottom:6px">
+        우리은행 1005-102-145078
+      </div>
+      <div style="font-size:12px;font-weight:600;opacity:.7">예금주 녹색당중앙당후원회</div>
+    </div>
+    <div style="flex:1;min-width:240px;background:#ffffff12;border-radius:16px;padding:24px 26px;display:flex;flex-direction:column;justify-content:space-between">
+      <div>
+        <div style="font-size:11px;font-weight:800;color:var(--accent);letter-spacing:.04em;margin-bottom:8px">🌿 녹색당 당원 가입하기</div>
+        <div style="font-size:clamp(15px,1.6vw,19px);font-weight:900;letter-spacing:-.04em">join.kgreens.org</div>
+      </div>
+      <a href="https://join.kgreens.org" target="_blank" rel="noopener"
+         style="display:inline-block;margin-top:14px;background:var(--accent);color:#fff;font-family:inherit;
+         font-size:13px;font-weight:800;padding:9px 22px;border-radius:999px;text-decoration:none;
+         letter-spacing:-.02em;align-self:flex-start">지금 가입하기 →</a>
+    </div>
+  </div>
+</section>
+
 <footer class="foot">
   <span id="footTime"></span>
   <button id="adminLoginBtn" onclick="openAdminModal()" style="appearance:none;border:0;background:transparent;
@@ -413,7 +435,7 @@ window.GBoard = (function () {
       id:2, region:"서울특별시 강서구", regionShort:"강서",
       title:"강서구 라선거구", typeLabel:"기초의회의원",
       headerTitle:"서울특별시 강서구",
-      type:"local", seats:2, pace:1.0, finalTotal:0,
+      type:"local", seats:3, pace:1.0, finalTotal:0,
       candidates:[
         {name:"김현희", party:"더불어민주당", votes:0, isGreen:false, number:"1-가"},
         {name:"양진석", party:"더불어민주당", votes:0, isGreen:false, number:"1-나"},
