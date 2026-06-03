@@ -111,6 +111,122 @@ GBOARD_DISTRICTS = [
     },
 ]
 
+# ── 후보자 명부 조회 (CPRI03) ────────────────────────────────
+# 각 선거구별 CPRI03 파라미터
+CANDIDATE_PARAMS = [
+    {  # 0: 경상북도 안동시 마선거구 (기초의회의원)
+        'electionCode': '6', 'cityCode': '4700', 'sggCityCode': '-1',
+        'townCode': '4706', 'sggTownCode': '6470605',
+        'proportionalRepresentationCode': '-1',
+    },
+    {  # 1: 제주 광역의원비례대표
+        'electionCode': '8', 'cityCode': '4900', 'sggCityCode': '-1',
+        'townCode': '-1', 'sggTownCode': '0',
+        'proportionalRepresentationCode': '-1',
+    },
+    {  # 2: 서울 강서구 라선거구 (기초의회의원)
+        'electionCode': '6', 'cityCode': '1100', 'sggCityCode': '-1',
+        'townCode': '1116', 'sggTownCode': '6111604',
+        'proportionalRepresentationCode': '-1',
+    },
+]
+
+def fetch_candidates(params):
+    """CPRI03 후보자 명부 조회. 후보자 목록 반환."""
+    sess = _nec_session()
+    show_url = f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=CP&secondMenuId=CPRI03'
+    try:
+        sess.get(BASE_URL + '/', timeout=6)
+        sess.get(show_url, timeout=8)
+        sess.headers.update({'Referer': f'{BASE_URL}/electioninfo/electionInfo_report.xhtml'})
+    except Exception:
+        pass
+
+    post_data = {
+        'electionId':                     ELECTION_ID,
+        'requestURI':                     f'/electioninfo/{ELECTION_ID}/cp/cpri03.jsp',
+        'topMenuId':                      'CP',
+        'secondMenuId':                   'CPRI03',
+        'menuId':                         'CPRI03',
+        'statementId':                    'CPRI03_#00',
+        'pageIndex':                      '1',
+        'firstIndex':                     '0',
+        'recordCountPerPage':             '100',
+        'dateCode':                       '0',
+        'x':                              '60',
+        'y':                              '10',
+    }
+    post_data.update(params)
+
+    r = sess.post(
+        f'{BASE_URL}/electioninfo/electionInfo_report.xhtml',
+        data=post_data, timeout=12
+    )
+    r.raise_for_status()
+    return _parse_candidates(r.text)
+
+
+def _parse_candidates(html):
+    """후보자 명부 HTML에서 이름·정당 추출."""
+    import re as _re
+    soup = BeautifulSoup(html, 'html.parser')
+
+    if any(soup.find(string=lambda t: t and s in t)
+           for s in ['조회 자료가 없습니다', '비정상적인 접근', '검색된 결과가 없습니다']):
+        return []
+
+    table = soup.find('table', class_='table01') or soup.find('table')
+    if not table:
+        return []
+
+    # 컬럼 헤더에서 성명·정당 인덱스 파악
+    rows = table.find_all('tr')
+    name_col = party_col = num_col = None
+    for row in rows:
+        headers = [th.get_text(strip=True) for th in row.find_all('th')]
+        for i, h in enumerate(headers):
+            if '성명' in h and name_col is None:   name_col  = i
+            if '정당명' in h and party_col is None: party_col = i
+            if '기호' in h and num_col is None:    num_col   = i
+        if name_col is not None:
+            break
+
+    # fallback 인덱스 (기호|성명|한자|생년월일|정당명 순 일반 구조)
+    if name_col is None:  name_col  = 2
+    if party_col is None: party_col = 5
+    if num_col is None:   num_col   = 1
+
+    candidates = []
+    GREEN_PARTIES = ['녹색당']
+    for row in rows:
+        cells = row.find_all('td')
+        if not cells or len(cells) < max(name_col, party_col) + 1:
+            continue
+        name  = cells[name_col].get_text(strip=True)
+        party = cells[party_col].get_text(strip=True) if party_col < len(cells) else ''
+        if not name or not party:
+            continue
+        candidates.append({
+            'name':    name,
+            'party':   party,
+            'isGreen': any(g in party for g in GREEN_PARTIES),
+        })
+    return candidates
+
+
+@app.route('/api/candidates')
+def api_candidates():
+    """3개 선거구 실제 후보자 명부 반환."""
+    result = []
+    for i, params in enumerate(CANDIDATE_PARAMS):
+        try:
+            cands = fetch_candidates(params)
+            result.append({'id': i, 'ok': True, 'candidates': cands})
+        except Exception as e:
+            result.append({'id': i, 'ok': False, 'candidates': [], 'error': str(e)})
+    return jsonify(result)
+
+
 # ── VCCP08 특정 선거구 조회 (브라우저 실측 파라미터) ─────────
 def fetch_district_data(post_params):
     """VCCP08 개표단위별 개표결과로 특정 선거구 데이터 조회."""

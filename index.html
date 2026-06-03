@@ -610,7 +610,7 @@ window.GBoard = (function () {
       var zeroCands = d.candidates.map(function(c){
         return {name:c.name,party:c.party,isGreen:c.isGreen,votes:0,pct:0,rank:0};
       });
-      return finalize(d, zeroCands, 0, 0, '데이터오류');
+      return finalize(d, zeroCands, 0, 0, '데이터 수신 실패');
     }
     if(force === 'manual') return snapManual(d);
     if(state.mode==="manual") return snapManual(d);
@@ -689,6 +689,16 @@ window.GBoard = (function () {
     getCrawl:function(){return state.crawl;},
     getCrawlStatus:function(){return state.crawlStatus;},
     getLogs:function(){return state.logs.slice();},
+    updateCandidates:function(id, newCands){
+      var d=DISTRICTS.find(function(x){return x.id===id;});
+      if(!d||!newCands||!newCands.length) return;
+      // 기존 seed·pace 등 메타 보존, 이름·정당·isGreen만 덮어씀
+      d.candidates=newCands.map(function(c){
+        var old=d.candidates.find(function(e){return e.name===c.name;});
+        return Object.assign({}, old||{}, {name:c.name, party:c.party, isGreen:!!c.isGreen, votes:0});
+      });
+      broadcast();
+    },
     setDistrictForce:function(id,force){
       // force: null(글로벌 모드) | 'manual' | 'error'
       state.districtForce[id]=force;
@@ -767,6 +777,14 @@ window.GPanel = (function () {
     .gp-num:focus{outline:none;border-color:#00a167}
     .gp-foot{display:flex;gap:10px;justify-content:flex-end;padding:16px 22px;border-top:1px solid #2217140f;background:#fafaf8}
     .gp-hint{font-size:11px;color:#22171488;font-weight:600}
+    .gp-tabs{display:flex;border-bottom:1.5px solid #2217140f;margin-bottom:6px}
+    .gp-tab{padding:7px 14px;font-size:12px;font-weight:700;color:#22171466;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1.5px;transition:.15s}
+    .gp-tab.on{color:#00a167;border-bottom-color:#00a167}
+    .gp-paste-area{width:100%;min-height:90px;font-family:ui-monospace,monospace;font-size:11.5px;padding:9px 11px;border:1.5px solid #2217141f;border-radius:9px;resize:vertical;line-height:1.5}
+    .gp-paste-area:focus{outline:none;border-color:#00a167}
+    .gp-parse-result{font-size:11px;font-weight:700;margin-top:6px;min-height:14px}
+    .gp-parse-result.ok{color:#00794d}
+    .gp-parse-result.err{color:#c2410c}
     `;
     var s=document.createElement("style");s.textContent=css;document.head.appendChild(s);
   }
@@ -874,23 +892,103 @@ window.GPanel = (function () {
     modal.onclick=function(e){if(e.target===modal)close();};
     bSeed.onclick=function(){GBoard.seedManualFromDemo();render();flash(hint,"데모 수치를 불러왔습니다");};
     bSave.onclick=function(){saveAll();flash(hint,"저장되어 현황판에 반영되었습니다 ✓");};
+    /* ── 선관위 텍스트 붙여넣기 파서 ── */
+    function parseNECText(text, districtId){
+      var rawDs=GBoard.rawDistricts().find(function(x){return x.id===districtId;});
+      if(!rawDs) return null;
+      var result={countingRate:0, candidates:[]};
+
+      // 개표율
+      var rm=text.match(/(\d{1,3}[.,]\d{1,2})\s*%/);
+      if(rm) result.countingRate=parseFloat(rm[1].replace(',','.'));
+
+      // 각 후보자 이름 뒤 첫 번째 숫자를 득표수로
+      rawDs.candidates.forEach(function(c){
+        var idx=text.indexOf(c.name);
+        if(idx<0){
+          result.candidates.push({name:c.name,party:c.party,isGreen:c.isGreen,votes:0});
+          return;
+        }
+        var after=text.slice(idx+c.name.length, idx+c.name.length+120);
+        var nm=after.match(/(\d{1,3}(?:,\d{3})*|\d+)/);
+        result.candidates.push({
+          name:c.name, party:c.party, isGreen:c.isGreen,
+          votes: nm ? parseInt(nm[1].replace(/,/g,'')) : 0
+        });
+      });
+      return result;
+    }
+
     function render(){
       body.innerHTML="";
       GBoard.rawDistricts().forEach(function(d){
         var m=GBoard.getManual(d.id)||{countingRate:0,candidates:d.candidates.map(function(c){return{name:c.name,party:c.party,isGreen:c.isGreen,votes:0};})};
         var box=el("div","gp-dist");
         box.innerHTML='<h4>'+d.title+'</h4><div class="sub">'+d.region+' · '+d.typeLabel+'</div>';
+
+        /* ── 탭: 개별 입력 / 텍스트 붙여넣기 ── */
+        var tabs=el("div","gp-tabs");
+        var tManual=el("div","gp-tab on","개별 입력");
+        var tPaste=el("div","gp-tab","텍스트 붙여넣기");
+        tabs.appendChild(tManual); tabs.appendChild(tPaste);
+        box.appendChild(tabs);
+
+        /* ── 개별 입력 패널 ── */
+        var panelManual=el("div","");
         var rate=el("div","gp-rate");rate.innerHTML='<label>개표율</label>';
         var ri=el("input","gp-num");ri.type="number";ri.step="0.1";ri.min="0";ri.max="100";
         ri.value=m.countingRate||0;ri.dataset.d=d.id;ri.dataset.k="rate";
-        rate.appendChild(ri);rate.appendChild(el("span","gp-hint","%"));box.appendChild(rate);
+        rate.appendChild(ri);rate.appendChild(el("span","gp-hint","%"));
+        panelManual.appendChild(rate);
         (m.candidates||[]).forEach(function(c,ci){
           var row=el("div","gp-cand");
           row.innerHTML='<div class="nm">'+c.name+(c.isGreen?' <span class="tag">녹색당</span>':' <span class="gp-hint">'+c.party+'</span>')+'</div>';
           var vi=el("input","gp-num");vi.type="number";vi.min="0";vi.placeholder="득표수";
           vi.value=c.votes||0;vi.dataset.d=d.id;vi.dataset.c=ci;
-          row.appendChild(vi);box.appendChild(row);
+          row.appendChild(vi);panelManual.appendChild(row);
         });
+        box.appendChild(panelManual);
+
+        /* ── 텍스트 붙여넣기 패널 ── */
+        var panelPaste=el("div","");panelPaste.style.display="none";
+        var hint=el("div","gp-hint","선관위 개표현황 페이지 텍스트를 전체 복사(Ctrl+A, Ctrl+C)하여 붙여넣으세요.");
+        hint.style.marginBottom="6px";
+        var ta=el("textarea","gp-paste-area");ta.placeholder="여기에 텍스트 붙여넣기...";
+        var pr=el("div","gp-parse-result","");
+        var bParse=el("button","gp-btn solid","자동 파싱");
+        bParse.style.marginTop="8px";
+        bParse.onclick=function(){
+          var parsed=parseNECText(ta.value, d.id);
+          if(!parsed||!parsed.candidates.length){
+            pr.className="gp-parse-result err"; pr.textContent="파싱 실패 — 후보자 이름이 텍스트에 없습니다."; return;
+          }
+          // 파싱 성공 → 개별 입력 필드에 값 채우기
+          var rateInput=panelManual.querySelector('input[data-k="rate"]');
+          if(rateInput) rateInput.value=parsed.countingRate||0;
+          parsed.candidates.forEach(function(c,ci){
+            var vi=panelManual.querySelector('input[data-c="'+ci+'"]');
+            if(vi) vi.value=c.votes||0;
+          });
+          var found=parsed.candidates.filter(function(c){return c.votes>0;}).length;
+          pr.className="gp-parse-result ok";
+          pr.textContent='✓ 파싱 완료 — '+found+'/'+parsed.candidates.length+'명 득표수 인식. 개별 입력 탭에서 확인 후 저장하세요.';
+          // 개별 입력 탭으로 전환
+          tManual.classList.add("on"); tPaste.classList.remove("on");
+          panelManual.style.display=""; panelPaste.style.display="none";
+        };
+        panelPaste.appendChild(hint);panelPaste.appendChild(ta);panelPaste.appendChild(bParse);panelPaste.appendChild(pr);
+        box.appendChild(panelPaste);
+
+        /* ── 탭 전환 ── */
+        tManual.onclick=function(){
+          tManual.classList.add("on");tPaste.classList.remove("on");
+          panelManual.style.display="";panelPaste.style.display="none";
+        };
+        tPaste.onclick=function(){
+          tPaste.classList.add("on");tManual.classList.remove("on");
+          panelPaste.style.display="";panelManual.style.display="none";
+        };
+
         body.appendChild(box);
       });
     }
@@ -1120,6 +1218,23 @@ function fetchPhotos(){
 fetchPhotos();
 setInterval(fetchPhotos, 15000);
 
+// 실제 후보자 데이터 로드 (NEC 후보자 명부)
+(function loadRealCandidates(){
+  fetch('/api/candidates',{cache:'no-store'})
+    .then(function(r){return r.json();})
+    .then(function(data){
+      var updated=false;
+      data.forEach(function(d){
+        if(d.ok && d.candidates && d.candidates.length>0){
+          GBoard.updateCandidates(d.id, d.candidates);
+          updated=true;
+        }
+      });
+      if(updated) console.log('[candidates] 실제 후보자 데이터 로드 완료');
+    })
+    .catch(function(e){ console.warn('[candidates] 로드 실패:', e); });
+})();
+
 /* ── 메인 렌더 ────────────────────────────────────────────── */
 (function(){
   var grid = document.getElementById('grid');
@@ -1278,8 +1393,8 @@ setInterval(fetchPhotos, 15000);
 
       // 후보 목록
       var list = document.getElementById('aList-'+ds.id);
-      if(ds.status==='데이터오류'){
-        list.innerHTML='<div class="error-card-notice">⛔ 데이터 수신 불가<br><span style="font-size:11px;font-weight:600;color:var(--ink-soft)">수동 입력 또는 크롤링 재시도 필요</span></div>';
+      if(ds.status==='데이터 수신 실패'){
+        list.innerHTML='<div class="error-card-notice">⛔ 데이터 수신 실패<br><span style="font-size:11px;font-weight:600;color:var(--ink-soft)">수동 입력 또는 크롤링 재시도 필요</span></div>';
       } else if(ds.status==='집계전'){
         // 집계전이어도 DISTRICTS에 후보 정보가 있으면 0표로 미리 표시
         var preCands = rawDs ? rawDs.candidates : [];
@@ -1317,7 +1432,7 @@ setInterval(fetchPhotos, 15000);
 
       // 푸터
       var st=document.getElementById('aSt-'+ds.id);
-      var isError = ds.status==='데이터오류';
+      var isError = ds.status==='데이터 수신 실패';
       st.className='c-status'+(ds.status==='개표완료'?' done':'')+(isError?' done':'');
       st.innerHTML='<span class="sd-dot" style="'+(isError?'background:#dc2626':'')+'"></span>'+ds.status;
       document.getElementById('aTot-'+ds.id).textContent=
