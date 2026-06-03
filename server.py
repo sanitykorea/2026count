@@ -10,10 +10,17 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 
 app = Flask(__name__, static_folder=os.path.dirname(os.path.abspath(__file__)))
 app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 사진 업로드 최대 20 MB
+
+# ── gboard 캐시 (Render 30s 타임아웃 방지) ───────────────────
+_gboard_cache = {'data': None, 'ts': 0}
+_gboard_cache_lock = threading.Lock()
+GBOARD_CACHE_TTL = 25  # seconds
 
 # ── 채팅 ─────────────────────────────────────────────────────
 _chat_messages = []
@@ -111,7 +118,7 @@ def fetch_nec_data(election_code, city_code):
     try:
         sess.get(
             f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCCP09',
-            timeout=15
+            timeout=8
         )
     except Exception:
         pass
@@ -129,7 +136,7 @@ def fetch_nec_data(election_code, city_code):
         'townCode':     '-1',
         'sggTownCode':  '0',
     }
-    r = sess.post(f'{BASE_URL}/electioninfo/electionInfo_report.xhtml', data=post_data, timeout=20)
+    r = sess.post(f'{BASE_URL}/electioninfo/electionInfo_report.xhtml', data=post_data, timeout=12)
     r.raise_for_status()
     return parse_html(r.text, election_code, city_code)
 
@@ -259,18 +266,19 @@ def api_gboard():
     with _override_lock:
         if _display_override is not None:
             return jsonify(_display_override)
-    result = []
-    for dc in GBOARD_DISTRICTS:
+
+    # 캐시 확인
+    with _gboard_cache_lock:
+        if _gboard_cache['data'] and (time.time() - _gboard_cache['ts']) < GBOARD_CACHE_TTL:
+            return jsonify(_gboard_cache['data'])
+
+    def fetch_one(dc):
         try:
             data = fetch_nec_data(dc['election_code'], dc['city_code'])
-
             if data.get('status') != 'ok':
-                result.append({'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []})
-                continue
+                return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
 
             districts = data.get('districts', [])
-
-            # 행 매칭
             matching = None
             for d in districts:
                 nm = d['name']
@@ -278,43 +286,43 @@ def api_gboard():
                 sf = dc.get('sub_filter')
                 if rf and rf not in nm: continue
                 if sf and sf not in nm: continue
-                matching = d
-                break
+                matching = d; break
 
-            # 비례: row_filter 없으면 합계 또는 첫 행
             if matching is None and dc.get('is_pr') and districts:
                 matching = next((d for d in districts if '합계' in d['name']), districts[0])
-
-            # 단순 row_filter fallback
             if matching is None and dc.get('row_filter'):
                 for d in districts:
                     if dc['row_filter'] in d['name']:
                         matching = d; break
-
             if matching is None:
-                result.append({'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []})
-                continue
+                return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
 
             total  = matching['total_votes']
             voters = matching['voter_count']
             rate   = round(min(100, total / voters * 100), 1) if voters > 0 and total > 0 else 0
-            status = '개표중' if total > 0 else '집계전'
-
+            status = '개표완료' if rate >= 99.9 else ('개표중' if total > 0 else '집계전')
             candidates = [
-                {
-                    'name':    c['name'],
-                    'party':   c['party'],
-                    'votes':   c['votes'],
-                    'isGreen': '녹색당' in (c.get('party') or ''),
-                }
+                {'name': c['name'], 'party': c['party'],
+                 'votes': c['votes'], 'isGreen': '녹색당' in (c.get('party') or '')}
                 for c in matching['candidates']
             ]
-
-            result.append({'id': dc['id'], 'countingRate': rate, 'status': status, 'candidates': candidates})
-
+            return {'id': dc['id'], 'countingRate': rate, 'status': status, 'candidates': candidates}
         except Exception as e:
             print(f'[gboard] district {dc["id"]} error: {e}')
-            result.append({'id': dc['id'], 'countingRate': 0, 'status': f'오류: {e}', 'candidates': []})
+            return {'id': dc['id'], 'countingRate': 0, 'status': '집계전', 'candidates': []}
+
+    # 3개 선거구 병렬 요청
+    result_map = {}
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = {ex.submit(fetch_one, dc): dc['id'] for dc in GBOARD_DISTRICTS}
+        for fut in as_completed(futures, timeout=20):
+            result_map[futures[fut]] = fut.result()
+
+    result = [result_map[dc['id']] for dc in GBOARD_DISTRICTS]
+
+    with _gboard_cache_lock:
+        _gboard_cache['data'] = result
+        _gboard_cache['ts']   = time.time()
 
     return jsonify(result)
 
@@ -390,7 +398,7 @@ def fetch_turnout_data(debug=False):
         sess.get(
             f'{BASE_URL}/main/showDocument.xhtml'
             f'?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCVP01',
-            timeout=15
+            timeout=8
         )
     except Exception:
         pass
@@ -411,7 +419,7 @@ def fetch_turnout_data(debug=False):
     try:
         r = sess.post(
             f'{BASE_URL}/electioninfo/electionInfo_report.xhtml',
-            data=post_data, timeout=20
+            data=post_data, timeout=12
         )
         r.raise_for_status()
         last_html = r.text

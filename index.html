@@ -61,10 +61,11 @@
     display:flex;flex-direction:column;transition:box-shadow .3s,border-color .3s}
   .card.live-pulse{box-shadow:0 0 0 2px var(--accent),0 14px 40px #00a16722;border-color:transparent}
 
-  .c-head{padding:14px 18px 12px;border-bottom:1px solid var(--line-soft);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-  .c-cons{font-size:12.5px;font-weight:800;color:var(--accent-deep);letter-spacing:-0.03em}
-  .c-type{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:-0.02em;
-    background:#2217140a;color:var(--ink-soft);padding:3px 9px;border-radius:6px}
+  .c-head{padding:14px 18px 13px;border-bottom:1px solid var(--line-soft)}
+  .c-region{font-size:11.5px;font-weight:700;color:var(--ink-soft);letter-spacing:-0.02em;margin-bottom:3px}
+  .c-cons{display:block;font-size:18px;font-weight:900;color:var(--ink);letter-spacing:-0.045em;line-height:1.15;margin-bottom:7px}
+  .c-type{display:inline-block;font-size:11.5px;font-weight:800;letter-spacing:-0.02em;
+    background:#2217140d;color:var(--ink-soft);padding:4px 11px;border-radius:7px}
 
   /* hero green candidate */
   .hero{padding:20px 18px;display:flex;align-items:center;gap:18px;background:
@@ -373,7 +374,7 @@ window.GBoard = (function () {
       candidates:[
         {name:"최민서", party:"더불어민주당", votes:8044, isGreen:false},
         {name:"한도윤", party:"국민의힘",     votes:6573, isGreen:false, seed:2.7},
-        {name:"서가람", party:"녹색당",       votes:2590, isGreen:true,  seed:1.4},
+        {name:"김유리", party:"녹색당",       votes:2590, isGreen:true,  seed:1.4},
         {name:"오진영", party:"진보당",       votes:1373, isGreen:false},
         {name:"강세움", party:"무소속",       votes:1040, isGreen:false}
       ]
@@ -1093,8 +1094,11 @@ setInterval(fetchPhotos, 15000);
       }
 
       card.innerHTML =
-        '<div class="c-head"><span class="c-cons" id="aCons-'+ds.id+'"></span>'+
-          '<span class="c-type">'+ds.typeLabel+'</span></div>'+
+        '<div class="c-head">'+
+          '<div class="c-region" id="cRegion-'+ds.id+'"></div>'+
+          '<span class="c-cons" id="aCons-'+ds.id+'"></span>'+
+          '<span class="c-type">'+ds.typeLabel+'</span>'+
+        '</div>'+
         '<div class="hero">'+
           '<div class="hero-photo-wrap">'+
             '<div class="hero-photo" id="aPhoto-'+ds.id+'">녹</div>'+
@@ -1173,16 +1177,17 @@ setInterval(fetchPhotos, 15000);
       var g = ds.green;
       var rawDs = GBoard.rawDistricts().find(function(rd){ return rd.id===ds.id; });
 
-      // 헤더
-      document.getElementById('aCons-'+ds.id).textContent = ds.region.split(' ')[0]+' '+ds.title;
+      // 헤더: 광역명(경상북도 / 제주특별자치도 / 서울특별시) + 선거구명
+      document.getElementById('cRegion-'+ds.id).textContent = ds.region.split(' ')[0];
+      document.getElementById('aCons-'+ds.id).textContent = ds.title;
 
       // 영웅 이름: PR 선거구는 DISTRICTS의 candidateName 사용
       var heroName = '—';
       if(g){
-        heroName = ds.regionShort+' '+g.name;
+        heroName = g.name;
         if(ds.type==='pr' && rawDs){
           var localGreen = rawDs.candidates.find(function(c){ return c.isGreen; });
-          if(localGreen && localGreen.candidateName) heroName = ds.regionShort+' '+localGreen.candidateName;
+          if(localGreen && localGreen.candidateName) heroName = localGreen.candidateName;
         }
       }
       document.getElementById('aHn-'+ds.id).textContent = heroName;
