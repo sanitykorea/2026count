@@ -26,7 +26,7 @@
     font-weight:900;color:#fff;font-size:20px;flex:0 0 auto}
   .brand .wm{font-weight:900;font-size:clamp(17px,1.7vw,21px);letter-spacing:-0.05em}
   .brand .wm small{display:block;font-weight:600;font-size:11px;opacity:.7;letter-spacing:-0.02em;margin-top:1px}
-  .top-title{font-weight:800;font-size:clamp(15px,1.7vw,20px);letter-spacing:-0.05em;line-height:1.15;margin-left:4px}
+  .top-title{font-weight:900;font-size:clamp(22px,2.5vw,34px);letter-spacing:-0.05em;line-height:1.15}
   .top-title b{color:var(--accent);font-weight:900}
   .top-right{margin-left:auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   .meta-date{font-size:12.5px;font-weight:600;opacity:.78;letter-spacing:-0.02em}
@@ -69,9 +69,15 @@
   /* hero green candidate */
   .hero{padding:20px 18px;display:flex;align-items:center;gap:18px;background:
     linear-gradient(180deg,#f4faf6,#ffffff);border-bottom:1px solid var(--line-soft)}
+  .hero-photo-wrap{position:relative;flex:0 0 auto}
   .hero-photo{width:106px;height:106px;border-radius:50%;background:#2217140a;border:2.5px solid var(--accent);
-    flex:0 0 auto;display:grid;place-items:center;overflow:hidden;font-size:36px;color:var(--accent);font-weight:900}
+    display:grid;place-items:center;overflow:hidden;font-size:36px;color:var(--accent);font-weight:900}
   .hero-photo img{width:100%;height:100%;object-fit:cover}
+  .photo-upload-btn{position:absolute;inset:0;border-radius:50%;background:#00000070;color:#fff;
+    font-size:11px;font-weight:800;display:none;align-items:center;justify-content:center;
+    cursor:pointer;border:0;font-family:inherit;letter-spacing:-.02em;opacity:0;transition:opacity .2s}
+  .hero-photo-wrap:hover .photo-upload-btn{opacity:1}
+  .admin-active .photo-upload-btn{display:flex}
   .hero-body{flex:1;min-width:0}
   .hero-name{font-size:clamp(23px,2.6vw,30px);font-weight:900;letter-spacing:-0.055em;line-height:1}
   .hero-party{font-size:12px;font-weight:700;color:var(--accent-deep);margin-top:3px}
@@ -99,7 +105,8 @@
   .seat-cnt{font-size:11.5px;font-weight:900;min-width:22px;text-align:right;color:var(--ink-soft)}
   .seat-row.gr .seat-party{color:var(--accent-deep);font-weight:900}
   .seat-row.gr .seat-cnt{color:var(--accent-deep)}
-  .seat-row.below{opacity:.38}
+  .seat-below-group{font-size:10px;font-weight:600;color:var(--ink-soft);margin-top:5px;padding-top:5px;
+    border-top:1px solid var(--line-soft);line-height:1.6}
   .seat-pending{font-size:11px;color:var(--ink-soft);text-align:center;padding:6px 0;font-weight:600}
 
   /* counting rate */
@@ -163,13 +170,9 @@
 
 <header class="top">
   <div class="top-in">
-    <div class="brand" id="brandLogo" title="관리자: 로고를 두 번 클릭">
-      <div class="brand-mark">녹</div>
-      <div class="wm">녹색당<small>Green Party Korea</small></div>
-    </div>
-    <div class="top-title">녹색당 2026 지방선거 <b>개표 현황판</b></div>
+    <div class="top-title" id="brandLogo" title="관리자: 로고를 두 번 클릭" style="cursor:pointer;user-select:none">녹색당 2026 지방선거 <b>개표 현황판</b></div>
     <div class="top-right">
-      <span class="meta-date" id="metaDate"></span>
+      <div id="turnoutInfo" style="font-size:12.5px;font-weight:700;opacity:.9;line-height:1.55;text-align:right"></div>
       <span class="live"><span class="d"></span>LIVE</span>
     </div>
   </div>
@@ -184,7 +187,6 @@
 <main><div class="wrap"><div class="grid" id="grid"></div></div></main>
 
 <footer class="foot">
-  <span>2026 제9회 전국동시지방선거 · 녹색당</span>
   <span id="footTime"></span>
 </footer>
 
@@ -233,7 +235,7 @@ window.GBoard = (function () {
   var DISTRICTS = [
     {
       id:0, region:"경상북도 안동시", regionShort:"안동",
-      title:"안동시 마선거구", typeLabel:"기초의회의원 · 2인 선거구",
+      title:"안동시 마선거구", typeLabel:"기초의회의원",
       type:"local", seats:2, pace:1.02, finalTotal:28430,
       candidates:[
         {name:"권상도",  party:"국민의힘",     votes:9640,  isGreen:false},
@@ -277,7 +279,9 @@ window.GBoard = (function () {
     manual:null,
     crawl:{ url:"/api/gboard", interval:60 },
     crawlData:null, crawlStatus:{ ok:false, msg:"대기 중", time:"" },
-    history:[[],[],[]]
+    history:[[],[],[]],
+    lastUpdateTime: null,
+    logs: []
   };
 
   function now(){ return new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
@@ -426,13 +430,21 @@ window.GBoard = (function () {
       .then(function(res){ if(!res.ok) throw new Error("HTTP "+res.status); return res.json(); })
       .then(function(data){
         state.crawlData=normalizeCrawl(data);
-        state.crawlStatus={ok:true,msg:"정상 수신",time:now()};
+        var t=now();
+        state.lastUpdateTime=t;
+        state.crawlStatus={ok:true,msg:"정상 수신",time:t};
+        state.logs.push({t:t,ok:true,msg:"정상 수신 (선거구 "+Object.keys(state.crawlData).length+"개)"});
+        if(state.logs.length>50) state.logs.shift();
         var snap=snapshot(); pushHistory(snap); broadcast();
       })
       .catch(function(e){
         var m=String(e&&e.message||e);
         if(/Failed to fetch|NetworkError|load failed/i.test(m)) m="서버 연결 실패 — python3 server.py 실행 확인";
-        state.crawlStatus={ok:false,msg:m,time:now()}; broadcast();
+        var t=now();
+        state.crawlStatus={ok:false,msg:m,time:t};
+        state.logs.push({t:t,ok:false,msg:m});
+        if(state.logs.length>50) state.logs.shift();
+        broadcast();
       });
   }
 
@@ -472,7 +484,8 @@ window.GBoard = (function () {
     return { meta:ELECTION, mode:state.mode, running:state.running,
              cycle:state.cycle, countdown:state.countdown, tick:tickFor(state.mode),
              crawlStatus:state.crawlStatus, crawl:state.crawl,
-             districts:ds, history:state.history.map(function(h){return h.slice();}) };
+             districts:ds, history:state.history.map(function(h){return h.slice();}),
+             lastUpdateTime:state.lastUpdateTime, logs:state.logs.slice(-20) };
   }
 
   function tickFor(m){ if(m==="manual") return REAL_TICK; if(m==="crawl") return state.crawl.interval||60; return DEMO_TICK; }
@@ -499,7 +512,7 @@ window.GBoard = (function () {
   }
   function advance(){
     state.cycle+=1; state.countdown=tickFor(state.mode);
-    if(state.mode==="demo"&&state.running) state.progress=Math.min(1,state.progress+DEMO_STEP);
+    if(state.mode==="demo"&&state.running){ state.progress=Math.min(1,state.progress+DEMO_STEP); state.lastUpdateTime=now(); }
     if(state.mode==="crawl") fetchCrawl();
     var snap=snapshot(); pushHistory(snap); save(); broadcast();
   }
@@ -531,11 +544,12 @@ window.GBoard = (function () {
     setProgress:function(p){state.progress=Math.max(0,Math.min(1,p));save();broadcast();},
     getMode:function(){return state.mode;},
     isRunning:function(){return state.running;},
-    setManual:function(id,data){if(!state.manual)state.manual={};state.manual[id]=data;save();broadcast();},
+    setManual:function(id,data){if(!state.manual)state.manual={};state.manual[id]=data;state.lastUpdateTime=now();save();broadcast();},
     getManual:function(id){return state.manual&&state.manual[id];},
     setCrawl:function(cfg){state.crawl={url:(cfg.url||"").trim(),interval:Math.max(3,+cfg.interval||60)};save();broadcast();},
     getCrawl:function(){return state.crawl;},
     getCrawlStatus:function(){return state.crawlStatus;},
+    getLogs:function(){return state.logs.slice();},
     crawlNow:function(){fetchCrawl();},
     testCrawl:function(url){
       return fetch((url||state.crawl.url),{cache:"no-store"})
@@ -745,7 +759,10 @@ window.GPanel = (function () {
     code.textContent='[\n  {"id":0,"countingRate":64.5,"status":"개표중",\n   "candidates":[{"name":"허승규","party":"녹색당","votes":7180},...]},\n  {"id":1,...}, {"id":2,...}\n]';
     help.appendChild(code);
     var testLine=el("div","gp-test","");
-    body.appendChild(callout);body.appendChild(fUrl);body.appendChild(fInt);body.appendChild(callout2);body.appendChild(help);body.appendChild(testLine);
+    var logLabel=el("div","gp-field");logLabel.innerHTML='<label>크롤링 로그</label>';
+    var logArea=el("div","gp-code");logArea.id="gpCrawlLog";logArea.style.cssText="max-height:130px;overflow-y:auto;font-size:10.5px;line-height:1.6";
+    logLabel.appendChild(logArea);
+    body.appendChild(callout);body.appendChild(fUrl);body.appendChild(fInt);body.appendChild(callout2);body.appendChild(help);body.appendChild(testLine);body.appendChild(logLabel);
     var foot=el("div","gp-foot");
     var hint=el("div","gp-hint","");
     var bTest=el("button","gp-btn","연결 테스트");
@@ -770,7 +787,15 @@ window.GPanel = (function () {
       GBoard.setCrawl({url:iUrl.value.trim(),interval:+iInt.value||60});
       flash(hint,"저장되었습니다 ✓");
     };
-    cmodal._sync=function(){var c=GBoard.getCrawl();iUrl.value=c.url||"/api/gboard";iInt.value=c.interval||60;testLine.textContent="";};
+    cmodal._sync=function(){
+      var c=GBoard.getCrawl();iUrl.value=c.url||"/api/gboard";iInt.value=c.interval||60;testLine.textContent="";
+      var logEl=document.getElementById('gpCrawlLog');
+      if(logEl){
+        var logs=GBoard.getLogs();
+        logEl.textContent=logs.length?logs.map(function(l){return l.t+' '+(l.ok?'✓':'✕')+' '+l.msg;}).join('\n'):'(로그 없음)';
+        logEl.scrollTop=logEl.scrollHeight;
+      }
+    };
   }
   function openCrawl(){if(GBoard.getMode()!=="crawl")GBoard.setMode("crawl");if(!cmodal)buildCrawl();cmodal._sync();cmodal.classList.add("open");}
 
@@ -823,37 +848,33 @@ document.getElementById('brandLogo').addEventListener('dblclick', function(){ if
 (function(){
   var ci = document.getElementById('controlsIn');
   if(isAdmin()){
+    document.body.classList.add('admin-active');
     GPanel.mount(ci);
   } else {
-    // 일반 뷰어용 상태 표시
-    var strip = document.createElement('div');
-    strip.className = 'viewer-strip';
-    var cd = document.createElement('div');
-    cd.className = 'viewer-cd';
-    cd.innerHTML = '<span class="dot"></span><span id="viewerCd">—</span>';
-    strip.appendChild(cd);
-    var btn = document.createElement('button');
-    btn.className = 'admin-btn';
-    btn.textContent = '관리자 로그인';
-    btn.onclick = openAdminModal;
-    strip.appendChild(btn);
-    ci.appendChild(strip);
-
-    // 카운트다운 표시
-    GBoard.subscribe(function(snap){
-      var el = document.getElementById('viewerCd');
-      if(el){
-        var label = snap.mode==='demo'?'데모':snap.mode==='manual'?'실시간':'선관위 데이터';
-        el.textContent = label + ' · ' + snap.countdown + '초 후 갱신';
-      }
-    });
+    document.querySelector('.controls').style.display = 'none';
   }
 })();
+
+/* ── 후보 사진 업로드 ─────────────────────────────────────── */
+function triggerPhotoUpload(id){
+  document.getElementById('aPhotoFile-'+id).click();
+}
+function handlePhotoUpload(id, input){
+  var file = input.files[0];
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var url = e.target.result;
+    localStorage.setItem('gboard.photo.'+id, url);
+    var ph = document.getElementById('aPhoto-'+id);
+    if(ph) ph.innerHTML = '<img src="'+url+'">';
+  };
+  reader.readAsDataURL(file);
+}
 
 /* ── 메인 렌더 ────────────────────────────────────────────── */
 (function(){
   var grid = document.getElementById('grid');
-  document.getElementById('metaDate').textContent = GBoard.ELECTION.date;
 
   var built = false;
 
@@ -877,7 +898,11 @@ document.getElementById('brandLogo').addEventListener('dblclick', function(){ if
         '<div class="c-head"><span class="c-cons" id="aCons-'+ds.id+'"></span>'+
           '<span class="c-type">'+ds.typeLabel+'</span></div>'+
         '<div class="hero">'+
-          '<div class="hero-photo" id="aPhoto-'+ds.id+'">녹</div>'+
+          '<div class="hero-photo-wrap">'+
+            '<div class="hero-photo" id="aPhoto-'+ds.id+'">녹</div>'+
+            '<button class="photo-upload-btn" onclick="triggerPhotoUpload('+ds.id+')" title="사진 업로드">사진</button>'+
+            '<input type="file" id="aPhotoFile-'+ds.id+'" accept="image/*" style="display:none" onchange="handlePhotoUpload('+ds.id+',this)">'+
+          '</div>'+
           '<div class="hero-body">'+
             '<div class="hero-name" id="aHn-'+ds.id+'">—</div>'+
             '<div class="hero-party" id="aHp-'+ds.id+'">녹색당</div>'+
@@ -897,6 +922,11 @@ document.getElementById('brandLogo').addEventListener('dblclick', function(){ if
       grid.appendChild(card);
     });
     built = true;
+    // 저장된 후보 사진 복원
+    [0,1,2].forEach(function(id){
+      var url = localStorage.getItem('gboard.photo.'+id);
+      if(url){ var ph=document.getElementById('aPhoto-'+id); if(ph) ph.innerHTML='<img src="'+url+'">'; }
+    });
   }
 
   /* 제주 의석 배분 렌더 */
@@ -912,22 +942,35 @@ document.getElementById('brandLogo').addEventListener('dblclick', function(){ if
     var seatResult = ds.seatCalc || GBoard.calcSeats(ds.candidates, ds.prSeats||13);
     var sorted = seatResult.slice().sort(function(a,b){ return b.seats!==a.seats?(b.seats-a.seats):(b.pct-a.pct); });
 
-    gridEl.innerHTML = sorted.map(function(p){
+    var eligible = sorted.filter(function(p){ return p.elig; });
+    var below = sorted.filter(function(p){ return !p.elig && p.pct > 0; });
+
+    var eligHTML = eligible.map(function(p){
       var col = GBoard.colorOf(p.party, 0);
       var dots = '';
       for(var i=0;i<Math.max(p.seats,0);i++){
         dots += '<span class="sd" style="background:'+col+'"></span>';
       }
       if(!dots) dots = '<span class="sd empty"></span>';
-      var belowClass = (!p.elig && ds.status!=='집계전') ? ' below' : '';
       var greenClass = p.isGreen ? ' gr' : '';
-      var cntText = p.seats > 0 ? p.seats+'석' : (p.pct > 0 && p.pct < 5 ? '5%↓' : '—');
-      return '<div class="seat-row'+greenClass+belowClass+'">'+
+      var cntText = p.seats > 0 ? p.seats+'석' : '—';
+      return '<div class="seat-row'+greenClass+'">'+
         '<span class="seat-party">'+p.name+'</span>'+
         '<span class="seat-dots">'+dots+'</span>'+
         '<span class="seat-cnt">'+cntText+'</span>'+
         '</div>';
     }).join('');
+
+    var belowHTML = '';
+    if(below.length > 0){
+      belowHTML = '<div class="seat-below-group">5% 미만: '+
+        below.map(function(p){
+          var col = p.isGreen ? 'var(--accent-deep)' : 'inherit';
+          return '<span style="color:'+col+'">'+p.name+' '+p.pct.toFixed(1)+'%</span>';
+        }).join(' · ')+'</div>';
+    }
+
+    gridEl.innerHTML = eligHTML + belowHTML;
   }
 
   function render(snap){
@@ -984,11 +1027,6 @@ document.getElementById('brandLogo').addEventListener('dblclick', function(){ if
           var col=GBoard.colorOf(c.party,i);
           var w=maxP>0?(c.pct/maxP*100):0;
           var dispName = c.name;
-          // PR: 녹색당은 "녹색당 김순애" 형식으로 표시
-          if(ds.type==='pr' && c.isGreen && rawDs){
-            var lc=rawDs.candidates.find(function(rc){return rc.isGreen;});
-            if(lc&&lc.candidateName) dispName = c.name+' 김순애';
-          }
           return '<div class="crow'+(c.isGreen?' green':'')+'">'+
             '<div class="crow-top"><span class="rk">'+c.rank+'</span>'+
               '<span class="nm">'+dispName+'</span>'+
@@ -1008,9 +1046,9 @@ document.getElementById('brandLogo').addEventListener('dblclick', function(){ if
         ds.totalVotes?'총 '+ds.totalVotes.toLocaleString()+(ds.type==='pr'?' (정당)':'표'):'';
     });
 
-    // 푸터 시간
+    // 푸터 시간 (크롤링: 마지막 수신 시각 / 데모·수동: 마지막 데이터 변경 시각)
     var ft=document.getElementById('footTime');
-    if(ft) ft.textContent='최종 업데이트 '+new Date().toLocaleTimeString('ko-KR');
+    if(ft) ft.textContent=snap.lastUpdateTime?'최종 업데이트 '+snap.lastUpdateTime:'';
   }
 
   var lastCycle=-1;
@@ -1024,6 +1062,25 @@ document.getElementById('brandLogo').addEventListener('dblclick', function(){ if
       });
     }
   });
+
+  /* ── 투표율 현황 ── */
+  function fetchTurnout(){
+    fetch('/api/turnout',{cache:'no-store'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var el=document.getElementById('turnoutInfo');
+        if(!el) return;
+        if(d.rate!=null){
+          el.innerHTML='투표율 <b style="font-size:15px">'+d.rate.toFixed(1)+'%</b>'+
+            (d.asOf?'<br><span style="opacity:.7;font-weight:600;font-size:11px">'+d.asOf+' 기준</span>':'');
+        } else {
+          el.innerHTML='<span style="opacity:.6;font-size:11px">투표율 집계 전</span>';
+        }
+      })
+      .catch(function(){ });
+  }
+  fetchTurnout();
+  setInterval(fetchTurnout, 5*60*1000);
 })();
 </script>
 </body>

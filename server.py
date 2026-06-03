@@ -271,6 +271,89 @@ def api_auth():
     ok = (data.get('password', '') == ADMIN_PASSWORD)
     return jsonify({'ok': ok})
 
+def fetch_turnout_data():
+    sess = requests.Session()
+    sess.headers.update({
+        'User-Agent':      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
+        'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+        'Referer':         BASE_URL + '/',
+        'Origin':          BASE_URL,
+    })
+    try:
+        sess.get(
+            f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VR&secondMenuId=VRCP09',
+            timeout=15
+        )
+    except Exception:
+        pass
+
+    post_data = {
+        'electionId':   ELECTION_ID,
+        'requestURI':   f'/electioninfo/{ELECTION_ID}/vr/vrcp09.jsp',
+        'topMenuId':    'VR',
+        'secondMenuId': 'VRCP09',
+        'menuId':       'VRCP09',
+        'statementId':  f'{ELECTION_ID}.VRCP09_#1',
+        'electionType': '1',
+        'cityCode':     '0',
+    }
+    r = sess.post(f'{BASE_URL}/electioninfo/electionInfo_report.xhtml', data=post_data, timeout=20)
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.text, 'html.parser')
+    result = {
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'rate': None,
+        'asOf': None,
+        'status': 'ok',
+    }
+
+    # 기준 시각 파싱 (예: "오전 10시 기준" 패턴)
+    text_all = soup.get_text()
+    import re
+    m = re.search(r'(오전|오후)?\s*(\d{1,2})시\s*기준', text_all)
+    if m:
+        result['asOf'] = m.group(0).strip()
+
+    table = soup.find('table', class_='table01') or soup.find('table')
+    if not table:
+        result['status'] = 'no_data'
+        return result
+
+    # 전국 합계 행에서 투표율(%) 추출
+    rows = table.find_all('tr')
+    for row in rows:
+        cells = row.find_all('td')
+        row_text = ' '.join(c.get_text(strip=True) for c in cells)
+        if '전국' in row_text or '합계' in row_text or (len(cells) >= 3 and result['rate'] is None):
+            for cell in cells:
+                t = cell.get_text(strip=True).replace(',', '')
+                if '.' in t and '%' not in t:
+                    try:
+                        val = float(t)
+                        if 0 <= val <= 100:
+                            result['rate'] = val
+                            break
+                    except Exception:
+                        pass
+            if result['rate'] is not None:
+                break
+
+    return result
+
+
+@app.route('/api/turnout')
+def api_turnout():
+    try:
+        data = fetch_turnout_data()
+    except Exception as e:
+        data = {'status': 'error', 'message': str(e),
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'rate': None, 'asOf': None}
+    return jsonify(data)
+
+
 @app.route('/')
 def index():
     return send_from_directory(os.path.dirname(os.path.abspath(__file__)), 'index.html')
