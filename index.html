@@ -898,26 +898,60 @@ window.GPanel = (function () {
     function parseNECText(text, districtId){
       var rawDs=GBoard.rawDistricts().find(function(x){return x.id===districtId;});
       if(!rawDs) return null;
-      var result={countingRate:0, candidates:[]};
+      var n=rawDs.candidates.length;
+      var result={countingRate:0, candidates:rawDs.candidates.map(function(c){
+        return {name:c.name,party:c.party,isGreen:c.isGreen,votes:0};
+      })};
 
-      // 개표율
+      // 개표율 (% 기호 있으면 추출)
       var rm=text.match(/(\d{1,3}[.,]\d{1,2})\s*%/);
       if(rm) result.countingRate=parseFloat(rm[1].replace(',','.'));
 
-      // 각 후보자 이름 뒤 첫 번째 숫자를 득표수로
-      rawDs.candidates.forEach(function(c){
-        var idx=text.indexOf(c.name);
-        if(idx<0){
-          result.candidates.push({name:c.name,party:c.party,isGreen:c.isGreen,votes:0});
-          return;
-        }
-        var after=text.slice(idx+c.name.length, idx+c.name.length+120);
-        var nm=after.match(/(\d{1,3}(?:,\d{3})*|\d+)/);
-        result.candidates.push({
-          name:c.name, party:c.party, isGreen:c.isGreen,
-          votes: nm ? parseInt(nm[1].replace(/,/g,'')) : 0
+      /* ── 핵심: 합계/소계 행에서 숫자를 순서대로 추출 ──
+         NEC 테이블 구조:
+         합계  [선거인수]  [투표수]  [후보1]  [후보2]  ...  [계]  [무효]  [기권]
+         후보 득표수는 인덱스 2 부터 시작, n개
+         검증: 후보 득표수의 합 == 계(인덱스 2+n)
+      ── */
+      var lines=text.split(/[\r\n]+/);
+
+      // 합계·소계 행 후보 (숫자가 많은 행 우선)
+      var candidates_lines=lines
+        .filter(function(l){ return /합계|소계/.test(l) || (l.match(/(\d{1,3}(?:,\d{3})+)/g)||[]).length>=3; })
+        .sort(function(a,b){
+          return (b.match(/(\d{1,3}(?:,\d{3})+|\d{4,})/g)||[]).length
+               - (a.match(/(\d{1,3}(?:,\d{3})+|\d{4,})/g)||[]).length;
         });
-      });
+
+      for(var li=0;li<candidates_lines.length;li++){
+        var nums=(candidates_lines[li].match(/(\d{1,3}(?:,\d{3})*)/g)||[])
+          .map(function(s){return parseInt(s.replace(/,/g,''));})
+          .filter(function(v){return v>0;});
+
+        if(nums.length < 2+n) continue; // 숫자가 부족하면 건너뜀
+
+        // 후보 득표수 = nums[2 .. 2+n-1]
+        var candVotes=nums.slice(2, 2+n);
+
+        // 검증: 합계(nums[2+n])가 있으면 득표수 합과 비교
+        if(nums.length > 2+n){
+          var sum=candVotes.reduce(function(a,b){return a+b;},0);
+          var declared=nums[2+n];
+          // 10% 이상 차이나면 잘못된 행
+          if(Math.abs(sum-declared)/Math.max(declared,1)>0.1) continue;
+        }
+
+        // 매핑
+        candVotes.forEach(function(v,i){
+          if(i<result.candidates.length) result.candidates[i].votes=v;
+        });
+
+        // 개표율이 없으면 투표수/선거인수로 계산
+        if(!result.countingRate && nums[0]>0 && nums[1]>0 && nums[1]<=nums[0]){
+          result.countingRate=Math.min(100, Math.round(nums[1]/nums[0]*1000)/10);
+        }
+        break;
+      }
       return result;
     }
 
