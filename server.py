@@ -13,6 +13,7 @@ import threading
 import os
 
 app = Flask(__name__, static_folder=os.path.dirname(os.path.abspath(__file__)))
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 사진 업로드 최대 20 MB
 
 # ── 채팅 ─────────────────────────────────────────────────────
 _chat_messages = []
@@ -335,7 +336,9 @@ def api_auth():
     ok = (data.get('password', '') == ADMIN_PASSWORD)
     return jsonify({'ok': ok})
 
-def fetch_turnout_data():
+import re as _re
+
+def _nec_session():
     sess = requests.Session()
     sess.headers.update({
         'User-Agent':      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
@@ -344,62 +347,33 @@ def fetch_turnout_data():
         'Referer':         BASE_URL + '/',
         'Origin':          BASE_URL,
     })
-    try:
-        sess.get(
-            f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VR&secondMenuId=VRCP09',
-            timeout=15
-        )
-    except Exception:
-        pass
+    return sess
 
-    post_data = {
-        'electionId':   ELECTION_ID,
-        'requestURI':   f'/electioninfo/{ELECTION_ID}/vr/vrcp09.jsp',
-        'topMenuId':    'VR',
-        'secondMenuId': 'VRCP09',
-        'menuId':       'VRCP09',
-        'statementId':  f'{ELECTION_ID}.VRCP09_#1',
-        'electionType': '1',
-        'cityCode':     '0',
-    }
-    r = sess.post(f'{BASE_URL}/electioninfo/electionInfo_report.xhtml', data=post_data, timeout=20)
-    r.raise_for_status()
-
-    soup = BeautifulSoup(r.text, 'html.parser')
-    result = {
-        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'rate': None,
-        'asOf': None,
-        'status': 'ok',
-    }
-
-    # 기준 시각 파싱 (예: "오전 10시 기준" 패턴)
+def _parse_rate_from_soup(soup):
+    """HTML에서 투표율 숫자와 기준시각 추출. (rate, asOf) 반환."""
     text_all = soup.get_text()
-    import re
-    m = re.search(r'(오전|오후)?\s*(\d{1,2})시\s*기준', text_all)
+    asOf = None
+    m = _re.search(r'(오전|오후)?\s*\d{1,2}시\s*기준', text_all)
     if m:
-        result['asOf'] = m.group(0).strip()
+        asOf = m.group(0).strip()
 
-    import re as _re
-
-    # ── 투표율 컬럼 인덱스 찾기 ──────────────────────────────
     table = soup.find('table', class_='table01') or soup.find('table')
     if not table:
-        result['status'] = 'no_data'
-        return result
+        return None, asOf
 
     rows = table.find_all('tr')
-    rate_col_idx = None
+
+    # 투표율 컬럼 인덱스 파악
+    rate_col = None
     for row in rows:
-        ths = row.find_all('th')
-        for i, th in enumerate(ths):
+        for i, th in enumerate(row.find_all('th')):
             if '투표율' in th.get_text():
-                rate_col_idx = i
+                rate_col = i
                 break
-        if rate_col_idx is not None:
+        if rate_col is not None:
             break
 
-    # ── 데이터 행에서 투표율 추출 ────────────────────────────
+    best = None
     for row in rows:
         cells = row.find_all('td')
         if not cells:
@@ -407,33 +381,110 @@ def fetch_turnout_data():
         row_text = ' '.join(c.get_text(strip=True) for c in cells)
         is_total = any(w in row_text for w in ['전국', '합계', '소계'])
 
-        # 컬럼 인덱스를 알면 해당 셀 직접 접근
-        if rate_col_idx is not None and rate_col_idx < len(cells):
-            t = cells[rate_col_idx].get_text(strip=True).replace(',', '')
+        candidates = []
+        # 1) 컬럼 인덱스로 직접
+        if rate_col is not None and rate_col < len(cells):
+            t = cells[rate_col].get_text(strip=True).replace(',', '')
             try:
-                val = float(t)
-                if 0.0 < val <= 100.0:
-                    result['rate'] = val
-                    if is_total:
-                        break
-                    continue
+                v = float(t)
+                if 0.0 < v <= 100.0:
+                    candidates.append(v)
             except Exception:
                 pass
+        # 2) 뒤쪽 셀에서 소수점 숫자 탐색
+        for cell in reversed(cells):
+            t = cell.get_text(strip=True).replace(',', '')
+            if _re.fullmatch(r'\d{1,3}\.\d+', t):
+                v = float(t)
+                if 0.0 < v <= 100.0:
+                    candidates.append(v)
+                    break
 
-        # fallback: 행 내 모든 셀에서 퍼센트처럼 보이는 값 탐색
-        if is_total or result['rate'] is None:
-            for cell in reversed(cells):  # 투표율은 보통 뒷 컬럼
-                t = cell.get_text(strip=True).replace(',', '')
-                m = _re.match(r'^(\d{1,3}\.\d+)$', t)
-                if m:
-                    val = float(m.group(1))
-                    if 0.0 < val <= 100.0:
-                        result['rate'] = val
-                        if is_total:
-                            break
-            if is_total and result['rate'] is not None:
+        if candidates:
+            best = candidates[0]
+            if is_total:
                 break
 
+    return best, asOf
+
+
+def fetch_turnout_data(debug=False):
+    """NEC에서 투표율을 가져온다. debug=True면 raw HTML도 반환."""
+    sess = _nec_session()
+
+    # 시도할 파라미터 조합 (electionType × statementId suffix)
+    candidates_params = [
+        ('4', '4'), ('4', '1'), ('4', '0'),
+        ('3', '3'), ('3', '1'),
+        ('1', '1'), ('1', '4'),
+    ]
+
+    last_html = ''
+    last_error = ''
+
+    for el_type, stmt_sfx in candidates_params:
+        try:
+            sess.get(
+                f'{BASE_URL}/main/showDocument.xhtml'
+                f'?electionId={ELECTION_ID}&topMenuId=VR&secondMenuId=VRCP09',
+                timeout=10
+            )
+        except Exception:
+            pass
+
+        post_data = {
+            'electionId':   ELECTION_ID,
+            'requestURI':   f'/electioninfo/{ELECTION_ID}/vr/vrcp09.jsp',
+            'topMenuId':    'VR',
+            'secondMenuId': 'VRCP09',
+            'menuId':       'VRCP09',
+            'statementId':  f'{ELECTION_ID}.VRCP09_#{stmt_sfx}',
+            'electionType': el_type,
+            'cityCode':     '0',
+        }
+        try:
+            r = sess.post(
+                f'{BASE_URL}/electioninfo/electionInfo_report.xhtml',
+                data=post_data, timeout=20
+            )
+            r.raise_for_status()
+            last_html = r.text
+
+            # 데이터 없음 문자열이면 다음 조합 시도
+            if '조회 자료가 없습니다' in r.text or '집계된 자료가 없습니다' in r.text:
+                last_error = f'no_data (electionType={el_type}, stmt=#{stmt_sfx})'
+                continue
+
+            soup = BeautifulSoup(r.text, 'html.parser')
+            rate, asOf = _parse_rate_from_soup(soup)
+
+            if rate is not None:
+                result = {
+                    'status':    'ok',
+                    'rate':      rate,
+                    'asOf':      asOf,
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    '_params':   f'electionType={el_type} stmt=#{stmt_sfx}',
+                }
+                if debug:
+                    result['_html'] = r.text[:8000]
+                return result
+
+            last_error = f'rate_not_found (electionType={el_type}, stmt=#{stmt_sfx})'
+
+        except Exception as e:
+            last_error = str(e)
+
+    # 모든 조합 실패
+    result = {
+        'status':    'no_data',
+        'rate':      None,
+        'asOf':      None,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'message':   last_error,
+    }
+    if debug:
+        result['_html'] = last_html[:8000]
     return result
 
 
@@ -445,6 +496,18 @@ def api_turnout():
         data = {'status': 'error', 'message': str(e),
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'rate': None, 'asOf': None}
+    return jsonify(data)
+
+
+@app.route('/api/debug/turnout')
+def api_debug_turnout():
+    """관리자용 투표율 디버그. ?password=... 필수."""
+    if request.args.get('password') != ADMIN_PASSWORD:
+        return jsonify({'ok': False}), 403
+    try:
+        data = fetch_turnout_data(debug=True)
+    except Exception as e:
+        data = {'status': 'error', 'message': str(e)}
     return jsonify(data)
 
 
