@@ -86,34 +86,37 @@ GBOARD_DISTRICTS = [
         'id': 0,  # 경상북도 안동시 마선거구 (기초의회의원 6)
         'is_pr': False,
         'election_code': 6,
+        'statement_id': 'VCCP09_#6_0',   # 브라우저 실측
         'city_code': '4700',
         'sgg_city_code': '0',
-        'town_code': '4706',       # 안동시
-        'sgg_town_code': '6470605', # 안동시마선거구
+        'town_code': '4706',              # 안동시
+        'sgg_town_code': '0',             # 전체 (브라우저 실측)
+        'referer_type': 'show',           # showDocument Referer
         'row_filter': '마선거구',
-        'sub_filter': None,
     },
     {
         'id': 1,  # 제주특별자치도 광역비례 (광역비례 8)
         'is_pr': True,
         'election_code': 8,
+        'statement_id': 'VCCP09_#8',      # 브라우저 실측 (suffix 없음)
         'city_code': '4900',
         'sgg_city_code': '0',
         'town_code': '-1',
-        'sgg_town_code': '0',
-        'row_filter': '합계',       # 합계 행 사용
-        'sub_filter': None,
+        'sgg_town_code': None,            # 파라미터 자체 없음
+        'referer_type': 'report',         # electionInfo_report Referer
+        'row_filter': '합계',
     },
     {
         'id': 2,  # 서울특별시 강서구 라선거구 (기초의회의원 6)
         'is_pr': False,
         'election_code': 6,
+        'statement_id': 'VCCP09_#6_0',   # 안동과 동일 패턴
         'city_code': '1100',
         'sgg_city_code': '0',
-        'town_code': '1116',       # 강서구
-        'sgg_town_code': '6111604', # 강서구라선거구
+        'town_code': '1116',              # 강서구
+        'sgg_town_code': '0',
+        'referer_type': 'show',
         'row_filter': '라선거구',
-        'sub_filter': None,
     },
 ]
 
@@ -322,7 +325,7 @@ def fetch_nec_data(election_code, city_code):
         'topMenuId':    'VC',
         'secondMenuId': 'VCCP09',
         'menuId':       'VCCP09',
-        'statementId':  f'VCCP09_#{election_code}',   # prefix 없음 (브라우저 실측)
+        'statementId':  f'VCCP09_#{election_code}_0',  # 브라우저 실측
         'electionCode': str(election_code),
         'cityCode':     str(city_code),
         'sggCityCode':  '0',
@@ -478,30 +481,40 @@ def api_gboard():
 
     def fetch_one(dc):
         try:
-            # 모든 선거구 VCCP09 통합 방식 사용
+            # VCCP09 개표진행상황 — 브라우저 실측 파라미터
             sess = _nec_session()
+            show_url = f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCCP09'
+            report_url = f'{BASE_URL}/electioninfo/electionInfo_report.xhtml'
             try:
                 sess.get(BASE_URL + '/', timeout=6)
-                show_url = f'{BASE_URL}/main/showDocument.xhtml?electionId={ELECTION_ID}&topMenuId=VC&secondMenuId=VCCP09'
                 sess.get(show_url, timeout=8)
-                sess.headers.update({'Referer': f'{BASE_URL}/electioninfo/electionInfo_report.xhtml'})
             except Exception:
                 pass
 
-            r = sess.post(f'{BASE_URL}/electioninfo/electionInfo_report.xhtml', data={
+            # Referer: 안동/강서는 showDocument, 제주는 electionInfo_report
+            if dc.get('referer_type') == 'report':
+                sess.headers.update({'Referer': report_url})
+            else:
+                sess.headers.update({'Referer': show_url})
+
+            post_data = {
                 'electionId':   ELECTION_ID,
                 'requestURI':   f'/electioninfo/{ELECTION_ID}/vc/vccp09.jsp',
                 'topMenuId':    'VC',
                 'secondMenuId': 'VCCP09',
                 'menuId':       'VCCP09',
-                'statementId':  f'VCCP09_#{dc["election_code"]}',
+                'statementId':  dc['statement_id'],
                 'electionCode': str(dc['election_code']),
                 'cityCode':     dc['city_code'],
                 'sggCityCode':  dc.get('sgg_city_code', '0'),
                 'townCode':     dc.get('town_code', '-1'),
-                'sggTownCode':  dc.get('sgg_town_code', '0'),
-                'x': '60', 'y': '10',
-            }, timeout=12)
+                'x': '71', 'y': '33',
+            }
+            # sggTownCode: None이면 파라미터 자체 포함하지 않음 (제주)
+            if dc.get('sgg_town_code') is not None:
+                post_data['sggTownCode'] = dc['sgg_town_code']
+
+            r = sess.post(report_url, data=post_data, timeout=12)
             r.raise_for_status()
 
             data = parse_html(r.text, dc['election_code'], dc['city_code'])
